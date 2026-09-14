@@ -1,0 +1,19 @@
+{
+  "contacts": [
+    {
+      "id": "contact_1",
+      "name": "Sarah (Caregiver)",
+      "relation": "Caregiver"
+    },
+    {
+      "id": "contact_2",
+      "name": "Mom",
+      "relation": "Family"
+    },
+    {
+      "id": "contact_3",
+      "name": "Alex (Friend)",
+      "relation": "Friend"
+    }
+  ]
+}

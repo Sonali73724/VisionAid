@@ -1,0 +1,27 @@
+{
+  "users": [
+    {
+      "id": "usr_demo",
+      "name": "Demo User",
+      "email": "user@visionaid.ai",
+      "password_hash": "26183e8dffd4b6984a1e578e4f1aa2520327164d6ea867ec17602f0b3a63c470",
+      "salt": "682f918ec76b4cae"
+    },
+    {
+      "id": "usr_89014d27",
+      "name": "Alice Doe",
+      "email": "alice@test.com",
+      "password_hash": "0d5e3a6f3dac4ff1ea4c59698fb64e0bc4d0c164be9dd6a8f4e9674439496e02",
+      "salt": "f523752721164323",
+      "is_guest": false
+    },
+    {
+      "id": "usr_01c29808",
+      "name": "Sonali Singh",
+      "email": "singhsonali3745@gmail.com",
+      "password_hash": "c563dd9d6e12d90a8a404c0a9ba346d36e2ff1324dfffd0a3e511fcb10e13e94",
+      "salt": "e380ffcbb61a4843",
+      "is_guest": false
+    }
+  ]
+}

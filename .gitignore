@@ -1,0 +1,27 @@
+# Virtual Environment (NEVER push this - it contains gigabytes of local files)
+.venv/
+venv/
+ENV/
+env/
+
+# Python byte code & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Buildozer & Android build outputs
+.buildozer/
+bin/
+*.apk
+*.aab
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Scratch & temporary logs
+scratch/
+.system_generated/
