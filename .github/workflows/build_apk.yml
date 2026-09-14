@@ -41,8 +41,18 @@ jobs:
         run: |
           buildozer -v android debug
 
+      - name: Upload Buildozer Logs on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-debug-logs
+          path: |
+            .buildozer/logs/
+            ~/.buildozer/logs/
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: VisionAid-Mobile-APK
           path: bin/*.apk

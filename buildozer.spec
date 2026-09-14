@@ -16,14 +16,17 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,wav,json
 
 # (list) List of directory to exclude
-source.exclude_dirs = tests, bin, .venv, .git, .github, scratch
+source.exclude_dirs = tests, bin, .venv, .git, .github, scratch, backend, __pycache__
+
+# (list) List of exclusions using pattern matching
+source.exclude_patterns = *.pt, *.zip, vision_app*.py, *test*.py, *.txt, server.py
 
 # (str) Application versioning
 version = 1.0.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy,requests,pillow,certifi,urllib3,charset-normalizer,idna
+requirements = python3,kivy,requests,pillow,certifi
 
 # (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
 orientation = portrait
@@ -47,7 +50,7 @@ android.skip_update = False
 android.accept_sdk_license = True
 
 # (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a
 
 # (str) Presplash of the application
 # android.presplash_color = #1A0F28
