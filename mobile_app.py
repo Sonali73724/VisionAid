@@ -9,7 +9,13 @@ import sys
 import time
 import threading
 import io
-import requests
+import json
+import urllib.request
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 try:
     import cv2
@@ -731,19 +737,49 @@ class MainScreen(Screen):
                     continue
 
                 url = f"{settings.server_url}/api/analyze"
-                files = {"file": ("frame.jpg", jpeg_bytes, "image/jpeg")}
                 data = {
                     "mode": self.mode,
                     "find_target": self.find_target,
                     "language": settings.language
                 }
 
-                r = requests.post(url, files=files, data=data, timeout=1.4)
-                if r.status_code == 200:
-                    payload = r.json()
+                payload = None
+
+                # 1. Preferred pure Python urllib multipart (zero pip wheel dependencies)
+                try:
+                    boundary = '----VisionAid' + hex(int(time.time() * 1000))[2:]
+                    body = bytearray()
+                    for k, v in data.items():
+                        body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode('utf-8'))
+                    body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="frame.jpg"\r\nContent-Type: image/jpeg\r\n\r\n'.encode('utf-8'))
+                    body.extend(jpeg_bytes)
+                    body.extend(f'\r\n--{boundary}--\r\n'.encode('utf-8'))
+
+                    req = urllib.request.Request(
+                        url,
+                        data=bytes(body),
+                        headers={'Content-Type': f'multipart/form-data; boundary={boundary}'}
+                    )
+                    with urllib.request.urlopen(req, timeout=1.4) as resp:
+                        if resp.status == 200:
+                            payload = json.loads(resp.read().decode('utf-8'))
+                except Exception:
+                    # 2. Fallback to requests if present
+                    if requests is not None:
+                        try:
+                            files = {"file": ("frame.jpg", jpeg_bytes, "image/jpeg")}
+                            r = requests.post(url, files=files, data=data, timeout=1.4)
+                            if r.status_code == 200:
+                                payload = r.json()
+                        except Exception:
+                            pass
+
+                if payload is not None:
                     Clock.schedule_once(lambda dt, res=payload: self._on_server_response(res))
+                else:
+                    Clock.schedule_once(lambda dt: setattr(self.hud_banner, "text", "Connecting to AI Server..."))
             except Exception:
-                Clock.schedule_once(lambda dt: setattr(self.hud_banner, "text", "Connecting to AI Server..."))
+                pass
 
             time.sleep(0.08)  # ~12 requests per second
 
