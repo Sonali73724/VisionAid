@@ -112,6 +112,8 @@ async def analyze_frame(
         "target_locked": False,
     }
 
+    language_manager.set_language(language)
+
     # 1. OBJECT, OBSTACLE, RADAR, FIND MODES (YOLO)
     if mode in ("object", "obstacle", "radar", "find"):
         results = model(frame, imgsz=320, conf=0.45, verbose=False)
@@ -161,34 +163,35 @@ async def analyze_frame(
         if mode == "object":
             if detections:
                 top = detections[:3]
-                items = [f"{d['name'].capitalize()} ({d['position']})" for d in top]
+                items = [f"{language_manager.translate_label(d['name'], language)} ({d['position']})" for d in top]
                 response["hud_text"] = " • ".join(items)
-                phrases = [f"a {d['name']} on your {d['position']}" if d['position'] != 'center' else f"a {d['name']} in front" for d in top]
-                response["speech_text"] = "I see " + ", and ".join(phrases) + "."
+                if language == "hi":
+                    phrases = []
+                    for d in top:
+                        pos_en = 'directly in front of you' if d['position'] == 'center' else ('on your ' + d['position'])
+                        pos_hi = language_manager.translate_position(pos_en, 'hi')
+                        lbl_hi = language_manager.translate_label(d['name'], 'hi')
+                        phrases.append(f"{pos_hi} {lbl_hi}")
+                    response["speech_text"] = "मुझे " + ", और ".join(phrases) + " दिख रहे हैं।"
+                else:
+                    phrases = [f"a {d['name']} on your {d['position']}" if d['position'] != 'center' else f"a {d['name']} in front" for d in top]
+                    response["speech_text"] = "I see " + ", and ".join(phrases) + "."
             else:
-                response["hud_text"] = "Scanning for objects..."
+                response["hud_text"] = language_manager.get_string("banner_detecting", language)
 
         elif mode == "obstacle":
             if detections:
                 crit = max(detections, key=lambda d: d["area_ratio"] + (0.25 if d["position"] == "center" else 0.0))
-                pos_desc = "directly in front" if crit["position"] == "center" else f"on your {crit['position']}"
+                pos_desc = "directly in front of you" if crit["position"] == "center" else f"on your {crit['position']}"
                 if crit["area_ratio"] >= 0.18 or (crit["position"] == "center" and crit["area_ratio"] >= 0.10):
                     response["hud_text"] = f"Warning! {crit['name']} very close {pos_desc}"
-                    response["speech_text"] = f"Warning! {crit['name']} is close {pos_desc}."
+                    response["speech_text"] = language_manager.format_obstacle_warning(crit["name"], pos=pos_desc, dist="very close", code=language)
                 else:
                     response["hud_text"] = f"Caution: {crit['name']} nearby {pos_desc}"
-                    response["speech_text"] = f"{crit['name'].capitalize()} {pos_desc}."
+                    response["speech_text"] = language_manager.format_detection(crit["name"], dist="close", pos=pos_desc, code=language)
             else:
-                response["hud_text"] = "Path appears clear"
+                response["hud_text"] = "Path appears clear" if language != "hi" else "रास्ता साफ है"
 
-        elif mode == "radar":
-            if detections:
-                crit = max(detections, key=lambda d: d["area_ratio"] + (0.25 if d["position"] == "center" else 0.0))
-                pos = crit["position"]
-                response["hud_text"] = f"Radar Tone: {crit['name'].capitalize()} [{pos.upper()}]"
-                response["play_sound"] = f"radar_{pos}"  # e.g. radar_left, radar_center, radar_right
-            else:
-                response["hud_text"] = "Path clear • No obstacles"
 
         elif mode == "find":
             target = find_target.lower().strip()
@@ -211,16 +214,20 @@ async def analyze_frame(
                 response["target_locked"] = is_locked
 
                 if is_locked:
-                    response["hud_text"] = f"TARGET LOCKED! {best['name'].capitalize()} is centered"
+                    tgt_name = language_manager.translate_label(best["name"], language)
+                    response["hud_text"] = f"TARGET LOCKED! {tgt_name.upper()}"
                     response["play_sound"] = "beacon_lock"
-                    response["speech_text"] = f"Target locked! {best['name']} is directly in front of you."
+                    response["speech_text"] = language_manager.format_target_found(best["name"], pos="directly in front of you", dist="close", code=language)
                 else:
                     dir_cue = "left" if offset < 0 else "right"
-                    response["hud_text"] = f"Found {best['name'].capitalize()} • Pan {dir_cue.upper()}"
+                    pos_desc = f"on your {dir_cue}"
+                    tgt_name = language_manager.translate_label(best["name"], language)
+                    response["hud_text"] = f"Found {tgt_name} • Pan {dir_cue.upper()}"
                     response["play_sound"] = "beacon_ping"
-                    response["speech_text"] = f"{best['name']} is on your {dir_cue}. Move camera {dir_cue}."
+                    response["speech_text"] = language_manager.format_target_found(best["name"], pos=pos_desc, dist="nearby", code=language)
             else:
-                response["hud_text"] = f"Searching for {find_target}... Pan camera slowly"
+                tgt_trans = language_manager.translate_label(find_target, language)
+                response["hud_text"] = f"Searching for {tgt_trans}... Pan camera slowly"
 
     # 2. FACE & EMOTION COMPANION
     elif mode == "face":
@@ -230,7 +237,7 @@ async def analyze_frame(
             primary = faces[0]
             summaries = [f"{f['name']}: {f['emotion']} ({f['position']})" for f in faces[:2]]
             response["hud_text"] = " • ".join(summaries)
-            response["speech_text"] = primary["description"]
+            response["speech_text"] = language_manager.format_face_found(primary["name"], primary["position"], code=language)
         else:
             response["hud_text"] = "Scanning for companions & faces..."
 
@@ -244,7 +251,7 @@ async def analyze_frame(
         response["read_text"] = full_text
         if full_text:
             response["hud_text"] = f"Read: {full_text[:50]}..."
-            response["speech_text"] = "I can read: " + full_text
+            response["speech_text"] = language_manager.format_text_reading(full_text, code=language)
         else:
             response["hud_text"] = "Scanning for text..."
 

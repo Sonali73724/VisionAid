@@ -9,17 +9,37 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-class TTSEngine:
-    """Robust, non-blocking Text-To-Speech engine for VisionAid."""
 
-    def __init__(self):
+
+import os
+
+try:
+    from kivy.utils import platform as kivy_platform
+    IS_ANDROID = (kivy_platform == 'android') or ('ANDROID_ARGUMENT' in os.environ) or ('ANDROID_ROOT' in os.environ)
+except Exception:
+    IS_ANDROID = ('ANDROID_ARGUMENT' in os.environ) or ('ANDROID_ROOT' in os.environ)
+
+
+class TTSEngine:
+    """Robust, non-blocking Text-To-Speech engine with multi-language voice support."""
+
+    def __init__(self, language="en"):
         self.system = platform.system()
+        self.is_android = IS_ANDROID
         self.speaker = None
         self.volume = 100
         self.rate = 0
+        self.language = language or "en"
         self._lock = threading.Lock()
 
-        if self.system == "Windows":
+        if self.is_android:
+            try:
+                from plyer import tts
+                self.speaker = tts
+                print("✅ Android Plyer TTS initialized successfully")
+            except Exception as e:
+                print("Android TTS error:", e)
+        elif self.system == "Windows":
             try:
                 import win32com.client
                 import pythoncom
@@ -27,7 +47,8 @@ class TTSEngine:
                 self.speaker = win32com.client.Dispatch("SAPI.SpVoice")
                 self.speaker.Rate = self.rate
                 self.speaker.Volume = self.volume
-                print("Windows SAPI TTS initialized (Async mode)")
+                self.set_language(self.language)
+                print(f"Windows SAPI TTS initialized (Async mode, Lang: {self.language})")
             except Exception as e:
                 print("SAPI initialization error, falling back to pyttsx3:", e)
                 try:
@@ -36,13 +57,67 @@ class TTSEngine:
                 except Exception as py_e:
                     print("pyttsx3 fallback error:", py_e)
                     self._pyttsx_engine = None
-        elif self.system == "Android":
+
+    def _find_voice_token_for_language(self, lang_code):
+        """Find the best matching Windows OneCore or SAPI voice token for the requested language."""
+        if self.system != "Windows":
+            return None
+
+        import winreg
+
+        # Language keywords to look for in token IDs
+        patterns = {
+            "hi": ["hiin", "hindi", "kalpana", "hemant"],
+            "en": ["enin", "heera", "ravi", "enus", "david", "zira", "mark", "english"],
+            "es": ["eses", "esmx", "spanish", "helena", "sabina", "pablo"],
+            "fr": ["frfr", "frca", "french", "paul", "hortense", "julie"],
+            "de": ["dede", "german", "stefan", "hedda", "katja"],
+            "ja": ["jajp", "japanese", "ayumi", "haruka", "ichiro"],
+            "ta": ["tain", "tamil", "valluvar"],
+        }
+        keywords = patterns.get(lang_code.lower(), [lang_code.lower()])
+
+        search_paths = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Speech\Voices\Tokens"),
+        ]
+
+        for root_key, path in search_paths:
             try:
-                from plyer import tts
-                self.speaker = tts
-                print("Android TTS initialized")
+                k = winreg.OpenKey(root_key, path)
+                count = winreg.QueryInfoKey(k)[0]
+                for i in range(count):
+                    sub = winreg.EnumKey(k, i)
+                    sub_lower = sub.lower()
+                    if any(kw in sub_lower for kw in keywords):
+                        return f"HKEY_LOCAL_MACHINE\\{path}\\{sub}"
+            except Exception:
+                continue
+
+        return None
+
+    def set_language(self, lang_code):
+        """Switch speech voice to match the selected language code."""
+        if not lang_code:
+            return
+        self.language = lang_code.strip().lower()
+
+        if self.system == "Windows" and self.speaker:
+            try:
+                token_id = self._find_voice_token_for_language(self.language)
+                if token_id:
+                    import win32com.client
+                    import pythoncom
+                    pythoncom.CoInitialize()
+                    tok = win32com.client.Dispatch("SAPI.SpObjectToken")
+                    tok.SetId(token_id)
+                    self.speaker.Voice = tok
+                    self.voice_name = self.speaker.Voice.GetDescription()
+                    print(f"TTS voice set to: {self.voice_name} (Language: {self.language})")
+                else:
+                    print(f"No specific voice token found for '{self.language}', keeping current voice.")
             except Exception as e:
-                print("Android TTS error:", e)
+                print(f"Failed to switch TTS voice for language '{self.language}':", e)
 
     def speak(self, text, interrupt=False):
         """Speak text asynchronously without blocking the UI main thread."""
@@ -53,10 +128,21 @@ class TTSEngine:
         if not text:
             return
 
-        print("TTS Speak:", text)
+        try:
+            print("TTS Speak:", text)
+        except Exception:
+            pass
 
-        if self.system == "Windows" and self.speaker:
+        if self.is_android:
             try:
+                from plyer import tts
+                threading.Thread(target=tts.speak, args=(text,), daemon=True).start()
+            except Exception as e:
+                print("Android TTS error:", e)
+        elif self.system == "Windows" and self.speaker:
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
                 # SVSFlagsAsync = 1, SVSFPurgeBeforeSpeak = 2
                 flags = 1  # asynchronous
                 if interrupt:
@@ -64,12 +150,6 @@ class TTSEngine:
                 self.speaker.Speak(text, flags)
             except Exception as e:
                 print("SAPI Async Speak error:", e)
-        elif self.system == "Android":
-            try:
-                from plyer import tts
-                threading.Thread(target=tts.speak, args=(text,), daemon=True).start()
-            except Exception as e:
-                print("Android TTS error:", e)
         else:
             # Fallback thread runner
             def _fallback_speak():
@@ -90,6 +170,8 @@ class TTSEngine:
         """Stop any currently playing speech immediately."""
         if self.system == "Windows" and self.speaker:
             try:
+                import pythoncom
+                pythoncom.CoInitialize()
                 # SVSFPurgeBeforeSpeak = 2, SVSFlagsAsync = 1
                 self.speaker.Speak("", 1 | 2)
             except Exception as e:
@@ -115,6 +197,6 @@ class TTSEngine:
 
 
 if __name__ == "__main__":
-    tts = TTSEngine()
-    tts.speak("VisionAid asynchronous audio engine is working.")
-    print("TTS test launched without blocking.")
+    tts = TTSEngine(language="hi")
+    tts.speak("नमस्ते! विज़नएड वॉइस इंजन तैयार है।")
+    print("TTS test launched.")

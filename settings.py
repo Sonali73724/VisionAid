@@ -96,3 +96,11 @@ class VisionSettings:
     def set_voice_enabled(self, enabled):
         self.voice_enabled = bool(enabled)
         self.save()
+
+
+# Global default instance
+settings = VisionSettings()
+
+
+def get_settings():
+    return settings

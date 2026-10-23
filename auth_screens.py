@@ -363,6 +363,7 @@ class LanguageSelectionScreen(Screen):
 
         # Update language manager & announce
         language_manager.set_language(self.selected_code)
+        self.tts.set_language(self.selected_code)
         self.title_lbl.text = f"[b]{language_manager.get_string('lang_title')}[/b]"
         self.sub_lbl.text = language_manager.get_string("lang_subtitle")
         self.continue_btn.set_text(language_manager.get_string("continue"))
@@ -371,7 +372,14 @@ class LanguageSelectionScreen(Screen):
 
     def _on_continue(self):
         self.settings.set_language(self.selected_code)
-        
+        language_manager.set_language(self.selected_code)
+        self.tts.set_language(self.selected_code)
+
+        if self.manager and self.manager.has_screen("main"):
+            main_scr = self.manager.get_screen("main")
+            if hasattr(main_scr, "update_language"):
+                main_scr.update_language()
+
         # Route to Login if not logged in, else to Main
         if self.manager:
             self.manager.transition = SlideTransition(direction="left")

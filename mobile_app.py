@@ -8,8 +8,15 @@ import os
 import sys
 import time
 import threading
+import io
 import requests
-import cv2
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+from PIL import Image as PILImage
 
 # Kivy configuration for Mobile Display
 from kivy.config import Config
@@ -31,12 +38,24 @@ from kivy.uix.label import Label
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.scrollview import ScrollView
+from kivy.core.text import LabelBase
+
+# Register Unicode & Devanagari font on Windows for crisp Hindi rendering
+for f in [r"C:\Windows\Fonts\mangal.ttf", r"C:\Windows\Fonts\aparaj.ttf"]:
+    if os.path.exists(f):
+        try:
+            fb = r"C:\Windows\Fonts\mangalb.ttf"
+            LabelBase.register(name="Roboto", fn_regular=f, fn_bold=fb if os.path.exists(fb) else f)
+            break
+        except Exception:
+            pass
 
 from settings import VisionSettings
 from settings_screen import SettingsScreen
 from tts_engine import TTSEngine
 from sound_effects import sound_manager
 from auth_screens import LanguageSelectionScreen, LoginScreen, SignupScreen
+from language_manager import language_manager, SUPPORTED_LANGUAGES
 
 # Assets
 BASE_DIR = os.path.dirname(__file__)
@@ -56,6 +75,7 @@ ICON_STOP = os.path.join(BASE_DIR, "assets", "icons", "icon_stop.png")
 ICON_FIND = os.path.join(BASE_DIR, "assets", "icons", "icon_find.png")
 ICON_RADAR = os.path.join(BASE_DIR, "assets", "icons", "icon_radar.png")
 ICON_FACE = os.path.join(BASE_DIR, "assets", "icons", "icon_face.png")
+ICON_GLOBE = os.path.join(BASE_DIR, "assets", "icons", "icon_globe.png")
 
 # Palette
 C_LILAC = (0.75, 0.52, 0.98, 1)          # #C084FC Soft Radiant Lilac
@@ -73,32 +93,60 @@ C_BORDER_DEFAULT = (0.40, 0.24, 0.56, 0.8)
 Window.size = (420, 780)
 Window.clearcolor = (0.07, 0.04, 0.11, 1)
 
-tts = TTSEngine()
 settings = VisionSettings()
+language_manager.set_language(settings.language)
+tts = TTSEngine(language=settings.language)
 
 
 def speak(text, interrupt=False):
     tts.speak(text, interrupt=interrupt)
 
 
+
 class ThreadedCamera:
-    """Thread-safe non-blocking camera capture for mobile preview."""
+    """Thread-safe non-blocking camera capture supporting both PC (OpenCV) and Android (Kivy CoreCamera)."""
     def __init__(self, src=0, width=640, height=480):
         self.src = src
-        self.cap = cv2.VideoCapture(self.src)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
+        self.width = width
+        self.height = height
         self.stopped = False
         self.grabbed = False
         self.frame = None
         self.lock = threading.Lock()
+        self.cap = None
+        self.core_cam = None
 
-        if self.cap.isOpened():
-            self.grabbed, self.frame = self.cap.read()
-            self.thread = threading.Thread(target=self._capture_loop, daemon=True)
-            self.thread.start()
+        # 1. Try OpenCV (Desktop / PC)
+        if cv2 is not None:
+            try:
+                self.cap = cv2.VideoCapture(self.src)
+                if self.cap.isOpened():
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    self.grabbed, self.frame = self.cap.read()
+                    self.thread = threading.Thread(target=self._capture_loop, daemon=True)
+                    self.thread.start()
+                    return
+            except Exception as e:
+                print("OpenCV camera init exception:", e)
+
+        # 2. Fallback to Kivy CoreCamera (Native Android / mobile)
+        try:
+            from kivy.core.camera import Camera as CoreCamera
+            self.core_cam = CoreCamera(index=self.src, resolution=(width, height), stopped=False)
+            self.core_cam.bind(on_texture=self._on_core_texture)
+            self.core_cam.start()
+            self.grabbed = True
+        except Exception as e:
+            print("Kivy CoreCamera init exception:", e)
+
+    def _on_core_texture(self, camera):
+        tex = camera.texture
+        if tex:
+            with self.lock:
+                self.frame = tex
+                self.grabbed = True
 
     def _capture_loop(self):
         while not self.stopped:
@@ -114,11 +162,17 @@ class ThreadedCamera:
     def read(self):
         with self.lock:
             if self.frame is not None:
-                return self.grabbed, self.frame.copy()
+                if hasattr(self.frame, "copy"):
+                    return self.grabbed, self.frame.copy()
+                return self.grabbed, self.frame
             return False, None
 
     def is_opened(self):
-        return self.cap is not None and self.cap.isOpened()
+        if self.cap is not None and self.cap.isOpened():
+            return True
+        if self.core_cam is not None:
+            return True
+        return False
 
     def release(self):
         self.stopped = True
@@ -127,6 +181,12 @@ class ThreadedCamera:
         if self.cap is not None:
             self.cap.release()
             self.cap = None
+        if self.core_cam is not None:
+            try:
+                self.core_cam.stop()
+            except Exception:
+                pass
+            self.core_cam = None
 
 
 class GradientActionCard(ButtonBehavior, BoxLayout):
@@ -248,14 +308,14 @@ class StatusPill(BoxLayout):
         self.status_icon.color = val
 
 
-class SettingsPillButton(ButtonBehavior, BoxLayout):
-    def __init__(self, icon_path, **kwargs):
+class LanguagePillButton(ButtonBehavior, BoxLayout):
+    def __init__(self, icon_path=None, **kwargs):
         super().__init__(**kwargs)
         self.orientation = "horizontal"
         self.size_hint = (None, 1)
-        self.width = dp(112)
-        self.padding = [dp(8), dp(6), dp(10), dp(6)]
-        self.spacing = dp(6)
+        self.width = dp(64)
+        self.padding = [dp(6), dp(4), dp(6), dp(4)]
+        self.spacing = dp(4)
 
         with self.canvas.before:
             self.canvas_bg = Color(0.24, 0.14, 0.38, 0.95)
@@ -264,7 +324,51 @@ class SettingsPillButton(ButtonBehavior, BoxLayout):
             self.border_line = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(14)), width=1.3)
 
         self.bind(pos=self._update_canvas, size=self._update_canvas)
-        self.gear_icon = Image(source=icon_path, size_hint=(None, 1), width=dp(22), fit_mode="contain")
+        self.globe_icon = Image(source=icon_path or ICON_GLOBE, size_hint=(None, 1), width=dp(16), fit_mode="contain", color=C_PINK)
+        self.text_lbl = Label(text="EN", font_size=11, bold=True, color=C_TEXT_WHITE, halign="center", valign="middle")
+        self.add_widget(self.globe_icon)
+        self.add_widget(self.text_lbl)
+
+    def _update_canvas(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+        self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(14))
+
+    @property
+    def text(self):
+        return self.text_lbl.text
+
+    @text.setter
+    def text(self, val):
+        self.text_lbl.text = val
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            self.canvas_bg.rgba = (0.38, 0.20, 0.58, 1)
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        self.canvas_bg.rgba = (0.24, 0.14, 0.38, 0.95)
+        return super().on_touch_up(touch)
+
+
+class SettingsPillButton(ButtonBehavior, BoxLayout):
+    def __init__(self, icon_path, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = "horizontal"
+        self.size_hint = (None, 1)
+        self.width = dp(96)
+        self.padding = [dp(6), dp(6), dp(8), dp(6)]
+        self.spacing = dp(4)
+
+        with self.canvas.before:
+            self.canvas_bg = Color(0.24, 0.14, 0.38, 0.95)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(14)])
+            Color(*C_BORDER_DEFAULT)
+            self.border_line = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(14)), width=1.3)
+
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+        self.gear_icon = Image(source=icon_path, size_hint=(None, 1), width=dp(20), fit_mode="contain")
         self.text_lbl = Label(text="SETTINGS", font_size=11, bold=True, color=C_TEXT_WHITE, halign="center", valign="middle")
         self.add_widget(self.gear_icon)
         self.add_widget(self.text_lbl)
@@ -293,6 +397,7 @@ class MainScreen(Screen):
         self.server_faces = []
 
         self._build_ui()
+        self.update_language()
 
     def _build_ui(self):
         root = BoxLayout(orientation="vertical", padding=[dp(16), dp(14), dp(16), dp(16)], spacing=dp(10))
@@ -303,21 +408,28 @@ class MainScreen(Screen):
                   size=lambda *_: setattr(self.bg_rect, "size", root.size))
 
         # Top Bar
-        header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(50), spacing=dp(8))
+        header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(50), spacing=dp(6))
         brand = BoxLayout(orientation="vertical", size_hint=(1, 1), spacing=dp(1))
-        app_title = Label(text="[b][color=C084FC]VISION[/color][color=F472B6]AID[/color][/b]", markup=True, font_size=23, halign="left", valign="bottom", size_hint=(1, 0.6))
+        app_title = Label(text="[b][color=C084FC]VISION[/color][color=F472B6]AID[/color][/b]", markup=True, font_size=22, halign="left", valign="bottom", size_hint=(1, 0.6))
         app_title.bind(size=app_title.setter("text_size"))
-        app_sub = Label(text="Mobile Cloud Companion", font_size=11, color=C_TEXT_MUTED, halign="left", valign="top", size_hint=(1, 0.4))
-        app_sub.bind(size=app_sub.setter("text_size"))
+        self.app_sub = Label(text=language_manager.get_string("app_subtitle"), font_size=11, color=C_TEXT_MUTED, halign="left", valign="top", size_hint=(1, 0.4))
+        self.app_sub.bind(size=self.app_sub.setter("text_size"))
         brand.add_widget(app_title)
-        brand.add_widget(app_sub)
+        brand.add_widget(self.app_sub)
 
         self.status_pill = StatusPill(icon_path=ICON_STATUS)
+        self.status_pill.width = dp(84)
+
+        self.lang_pill = LanguagePillButton(icon_path=ICON_GLOBE)
+        self.lang_pill.bind(on_press=self.cycle_language)
+
         settings_btn = SettingsPillButton(icon_path=ICON_SETTINGS)
+        settings_btn.width = dp(96)
         settings_btn.bind(on_press=self.open_settings)
 
         header.add_widget(brand)
         header.add_widget(self.status_pill)
+        header.add_widget(self.lang_pill)
         header.add_widget(settings_btn)
         root.add_widget(header)
 
@@ -335,14 +447,14 @@ class MainScreen(Screen):
         # Standby Placeholder
         self.placeholder = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(14), size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
         cam_icon = Image(source=ICON_CAMERA, size_hint=(1, 0.42), fit_mode="contain")
-        ready_t = Label(text="Vision Camera Standby", font_size=16, bold=True, color=C_TEXT_WHITE, size_hint=(1, 0.32), halign="center")
-        ready_s = Label(text="Select an AI mode below to begin assistance", font_size=12, color=C_TEXT_MUTED, size_hint=(1, 0.26), halign="center")
+        self.ready_t = Label(text=language_manager.get_string("cam_standby_title"), font_size=16, bold=True, color=C_TEXT_WHITE, size_hint=(1, 0.32), halign="center")
+        self.ready_s = Label(text=language_manager.get_string("cam_standby_sub"), font_size=12, color=C_TEXT_MUTED, size_hint=(1, 0.26), halign="center")
         self.placeholder.add_widget(cam_icon)
-        self.placeholder.add_widget(ready_t)
-        self.placeholder.add_widget(ready_s)
+        self.placeholder.add_widget(self.ready_t)
+        self.placeholder.add_widget(self.ready_s)
 
         # Floating HUD Banner
-        self.hud_banner = Label(text="System ready. Select a mode below.", font_size=13, bold=True, color=C_TEXT_WHITE, size_hint=(0.92, None), height=dp(38), pos_hint={"center_x": 0.5, "y": 0.04}, halign="center", valign="middle")
+        self.hud_banner = Label(text=language_manager.get_string("banner_standby"), font_size=13, bold=True, color=C_TEXT_WHITE, size_hint=(0.92, None), height=dp(38), pos_hint={"center_x": 0.5, "y": 0.04}, halign="center", valign="middle")
         self.hud_banner.bind(size=self.hud_banner.setter("text_size"))
         with self.hud_banner.canvas.before:
             Color(1, 1, 1, 1)
@@ -370,9 +482,6 @@ class MainScreen(Screen):
         self.card_find.bind(on_press=lambda _: self.start_mode("find"))
         card_list.add_widget(self.card_find)
 
-        self.card_radar = GradientActionCard(ICON_RADAR, "Spatial Audio Radar", "Directional stereo pulses alert without speech", C_RADAR)
-        self.card_radar.bind(on_press=lambda _: self.start_mode("radar"))
-        card_list.add_widget(self.card_radar)
 
         self.card_face = GradientActionCard(ICON_FACE, "Face & Emotion Companion", "Identify familiar contacts & smiling expressions", C_FACE)
         self.card_face.bind(on_press=lambda _: self.start_mode("face"))
@@ -394,6 +503,63 @@ class MainScreen(Screen):
         root.add_widget(scroll)
         self.add_widget(root)
 
+    def on_enter(self):
+        self.update_language()
+
+    def cycle_language(self, *args):
+        langs = [l["code"] for l in SUPPORTED_LANGUAGES]
+        cur = settings.language or "en"
+        next_idx = (langs.index(cur) + 1) % len(langs) if cur in langs else 0
+        new_lang = langs[next_idx]
+        settings.set_language(new_lang)
+        language_manager.set_language(new_lang)
+        tts.set_language(new_lang)
+        self.update_language()
+        info = language_manager.get_language_info(new_lang)
+        speak(info["confirmation"], interrupt=True)
+
+    def update_language(self):
+        lang = settings.language or "en"
+        language_manager.set_language(lang)
+        tts.set_language(lang)
+
+        lang_info = language_manager.get_language_info(lang)
+        if hasattr(self, "lang_pill"):
+            self.lang_pill.text = lang_info["badge"]
+
+        if hasattr(self, "app_sub"):
+            self.app_sub.text = language_manager.get_string("app_subtitle", lang)
+
+        if hasattr(self, "ready_t"):
+            self.ready_t.text = language_manager.get_string("cam_standby_title", lang)
+        if hasattr(self, "ready_s"):
+            self.ready_s.text = language_manager.get_string("cam_standby_sub", lang)
+
+        if self.mode is None:
+            if hasattr(self, "status_pill"):
+                self.status_pill.text = language_manager.get_string("status_standby", lang)
+            if hasattr(self, "hud_banner"):
+                self.hud_banner.text = language_manager.get_string("banner_standby", lang)
+
+        if hasattr(self, "card_find"):
+            self.card_find.title_lbl.text = language_manager.get_string("card_find_title", lang)
+            self.card_find.desc_lbl.text = language_manager.get_string("card_find_sub", lang)
+        if hasattr(self, "card_object"):
+            self.card_object.title_lbl.text = language_manager.get_string("card_object_title", lang)
+            self.card_object.desc_lbl.text = language_manager.get_string("card_object_sub", lang)
+        if hasattr(self, "card_face"):
+            self.card_face.title_lbl.text = language_manager.get_string("card_face_title", lang)
+            self.card_face.desc_lbl.text = language_manager.get_string("card_face_sub", lang)
+        if hasattr(self, "card_text"):
+            self.card_text.title_lbl.text = language_manager.get_string("card_text_title", lang)
+            self.card_text.desc_lbl.text = language_manager.get_string("card_text_sub", lang)
+        if hasattr(self, "card_obstacle"):
+            self.card_obstacle.title_lbl.text = language_manager.get_string("card_obstacle_title", lang)
+            self.card_obstacle.desc_lbl.text = language_manager.get_string("card_obstacle_sub", lang)
+        if hasattr(self, "card_stop"):
+            self.card_stop.title_lbl.text = language_manager.get_string("card_stop_title", lang)
+            self.card_stop.desc_lbl.text = language_manager.get_string("card_stop_sub", lang)
+
     def open_settings(self, *args):
         if self.manager:
             self.manager.transition = SlideTransition(direction="left")
@@ -404,8 +570,9 @@ class MainScreen(Screen):
             return True
         self.camera = ThreadedCamera(0, 640, 480)
         if not self.camera.is_opened():
-            self.hud_banner.text = "Camera access error"
-            speak("Could not access camera", interrupt=True)
+            err_msg = language_manager.get_string("camera_error")
+            self.hud_banner.text = err_msg
+            speak(err_msg, interrupt=True)
             self.camera = None
             return False
         self.placeholder.opacity = 0
@@ -424,17 +591,16 @@ class MainScreen(Screen):
         self.camera_image.texture = None
         self.camera_image.opacity = 0
         self.placeholder.opacity = 1
-        self.status_pill.text = "STANDBY"
+        self.status_pill.text = language_manager.get_string("status_standby")
         self.status_pill.color = C_LILAC
-        self.hud_banner.text = "Camera stopped. Ready to assist."
+        self.hud_banner.text = language_manager.get_string("banner_standby")
 
         self.card_object.set_active(False)
         self.card_find.set_active(False)
-        self.card_radar.set_active(False)
         self.card_face.set_active(False)
         self.card_text.set_active(False)
         self.card_obstacle.set_active(False)
-        speak("Camera stopped", interrupt=True)
+        speak(language_manager.get_string("camera_stopped"), interrupt=True)
 
     def start_mode(self, mode):
         if not self.open_camera():
@@ -442,15 +608,18 @@ class MainScreen(Screen):
         self.mode = mode
         self.card_object.set_active(mode == "object")
         self.card_find.set_active(mode == "find")
-        self.card_radar.set_active(mode == "radar")
         self.card_face.set_active(mode == "face")
         self.card_text.set_active(mode == "text")
         self.card_obstacle.set_active(mode == "obstacle")
 
-        self.status_pill.text = mode.upper()
+        lang = settings.language
+        card_key = f"card_{mode}_title"
+        mode_title = language_manager.get_string(card_key, lang)
+        self.status_pill.text = mode_title.upper()
         self.status_pill.color = C_PINK if mode == "text" else (C_FIND if mode == "find" else C_LILAC)
-        self.hud_banner.text = f"Connecting to AI server for {mode} mode..."
-        speak(f"{mode} mode activated", interrupt=True)
+        self.hud_banner.text = f"{mode_title}..."
+        mode_speak = language_manager.get_string(f"mode_{mode}", lang)
+        speak(mode_speak, interrupt=True)
 
         Clock.unschedule(self.update_camera)
         Clock.schedule_interval(self.update_camera, 1.0 / 30.0)
@@ -465,25 +634,32 @@ class MainScreen(Screen):
         with self.frame_lock:
             self.latest_frame = frame
 
-        display_frame = cv2.flip(frame, 1)
-        fh, fw = display_frame.shape[:2]
+        # Case A: Kivy Texture (Mobile Android CoreCamera)
+        if hasattr(frame, 'pixels') or not hasattr(frame, 'shape'):
+            self.camera_image.texture = frame
+            return
 
-        # Draw overlays from latest server response
-        for d in self.server_detections:
-            x1, y1, x2, y2 = d["bbox"]
-            disp_x1 = max(0, min(fw, fw - x2))
-            disp_x2 = max(0, min(fw, fw - x1))
-            color = (244, 114, 182) if d.get("position") == "center" else (192, 132, 252)
-            cv2.rectangle(display_frame, (disp_x1, y1), (disp_x2, y2), color, 2)
-            lbl = f"{d['name']} [{d.get('position', 'C')[0].upper()}]"
-            cv2.putText(display_frame, lbl, (disp_x1 + 4, max(18, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
+        # Case B: Numpy ndarray (Desktop OpenCV)
+        if cv2 is not None and hasattr(frame, 'shape'):
+            display_frame = cv2.flip(frame, 1)
+            fh, fw = display_frame.shape[:2]
 
-        # Blit frame to texture
-        rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
-        if self.camera_image.texture is None or self.camera_image.texture.size != (fw, fh):
-            self.camera_image.texture = Texture.create(size=(fw, fh), colorfmt="rgb")
-        self.camera_image.texture.blit_buffer(rgb.tobytes(), colorfmt="rgb", bufferfmt="ubyte")
-        self.camera_image.texture.flip_vertical()
+            # Draw overlays from latest server response
+            for d in self.server_detections:
+                x1, y1, x2, y2 = d.get("bbox", [0, 0, 0, 0])
+                disp_x1 = max(0, min(fw, fw - x2))
+                disp_x2 = max(0, min(fw, fw - x1))
+                color = (244, 114, 182) if d.get("position") == "center" else (192, 132, 252)
+                cv2.rectangle(display_frame, (disp_x1, y1), (disp_x2, y2), color, 2)
+                lbl = f"{d.get('name', '')} [{d.get('position', 'C')[0].upper()}]"
+                cv2.putText(display_frame, lbl, (disp_x1 + 4, max(18, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
+
+            # Blit frame to texture
+            rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+            if self.camera_image.texture is None or self.camera_image.texture.size != (fw, fh):
+                self.camera_image.texture = Texture.create(size=(fw, fh), colorfmt="rgb")
+            self.camera_image.texture.blit_buffer(rgb.tobytes(), colorfmt="rgb", bufferfmt="ubyte")
+            self.camera_image.texture.flip_vertical()
 
     def _start_network_worker(self):
         if self.network_running:
@@ -510,35 +686,63 @@ class MainScreen(Screen):
             frame_to_send = None
             with self.frame_lock:
                 if self.latest_frame is not None:
-                    frame_to_send = self.latest_frame.copy()
+                    if hasattr(self.latest_frame, "copy"):
+                        frame_to_send = self.latest_frame.copy()
+                    else:
+                        frame_to_send = self.latest_frame
 
             if frame_to_send is None:
                 time.sleep(0.02)
                 continue
 
             try:
-                # Downscale to 320px & compress to ~12KB JPEG
-                h, w = frame_to_send.shape[:2]
-                scale = 320.0 / max(w, 1)
-                small = cv2.resize(frame_to_send, (320, int(h * scale)))
-                ret, jpeg = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 65])
-                if not ret:
+                jpeg_bytes = None
+
+                # Case A: Numpy ndarray (Desktop OpenCV)
+                if hasattr(frame_to_send, "shape"):
+                    h, w = frame_to_send.shape[:2]
+                    scale = 320.0 / max(w, 1)
+                    target_w = 320
+                    target_h = max(1, int(h * scale))
+
+                    if cv2 is not None:
+                        small = cv2.resize(frame_to_send, (target_w, target_h))
+                        ret, jpeg = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                        if ret:
+                            jpeg_bytes = jpeg.tobytes()
+                    else:
+                        pil_img = PILImage.fromarray(frame_to_send)
+                        buf = io.BytesIO()
+                        pil_img.resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
+                        jpeg_bytes = buf.getvalue()
+
+                # Case B: Kivy Texture (Mobile CoreCamera)
+                elif hasattr(frame_to_send, "pixels"):
+                    tex = frame_to_send
+                    target_w = 320
+                    target_h = max(1, int(320 * tex.height / max(1, tex.width)))
+                    pil_img = PILImage.frombytes(mode='RGBA', size=tex.size, data=tex.pixels)
+                    buf = io.BytesIO()
+                    pil_img.convert('RGB').resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
+                    jpeg_bytes = buf.getvalue()
+
+                if not jpeg_bytes:
+                    time.sleep(0.02)
                     continue
 
                 url = f"{settings.server_url}/api/analyze"
-                files = {"file": ("frame.jpg", jpeg.tobytes(), "image/jpeg")}
+                files = {"file": ("frame.jpg", jpeg_bytes, "image/jpeg")}
                 data = {
                     "mode": self.mode,
                     "find_target": self.find_target,
                     "language": settings.language
                 }
 
-                r = requests.post(url, files=files, data=data, timeout=1.2)
+                r = requests.post(url, files=files, data=data, timeout=1.4)
                 if r.status_code == 200:
                     payload = r.json()
                     Clock.schedule_once(lambda dt, res=payload: self._on_server_response(res))
-            except Exception as e:
-                # Handle connection timeout gracefully
+            except Exception:
                 Clock.schedule_once(lambda dt: setattr(self.hud_banner, "text", "Connecting to AI Server..."))
 
             time.sleep(0.08)  # ~12 requests per second
@@ -572,6 +776,23 @@ class VisionAidMobileApp(App):
     """VisionAid Mobile Application Root."""
     def build(self):
         self.title = "VisionAid Mobile"
+
+        # Request Android runtime permissions on startup (Android 6.0+)
+        from kivy.utils import platform as kivy_platform
+        if kivy_platform == 'android':
+            try:
+                from android.permissions import request_permissions, Permission
+                request_permissions([
+                    Permission.CAMERA,
+                    Permission.RECORD_AUDIO,
+                    Permission.INTERNET,
+                    Permission.ACCESS_NETWORK_STATE,
+                    Permission.VIBRATE
+                ])
+                print("Android permissions requested")
+            except Exception as e:
+                print("Android permissions request error:", e)
+
         sm = ScreenManager(transition=SlideTransition(duration=0.25))
 
         self.language_screen = LanguageSelectionScreen(settings=settings, tts=tts, name="language_select")
@@ -597,7 +818,10 @@ class VisionAidMobileApp(App):
 
     def on_stop(self):
         if hasattr(self, "main_screen") and self.main_screen is not None:
-            self.main_screen.stop_camera()
+            try:
+                self.main_screen.stop_camera()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

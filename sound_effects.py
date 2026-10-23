@@ -3,8 +3,18 @@ import wave
 import struct
 import math
 import time
-import winsound
 import threading
+
+# Cross-platform sound: Kivy SoundLoader (Android/Desktop) with Windows winsound fallback
+try:
+    from kivy.core.audio import SoundLoader
+except Exception:
+    SoundLoader = None
+
+try:
+    import winsound
+except ImportError:
+    winsound = None
 
 SOUNDS_DIR = os.path.join(os.path.dirname(__file__), "assets", "sounds")
 os.makedirs(SOUNDS_DIR, exist_ok=True)
@@ -86,11 +96,31 @@ class SoundManager:
         self.last_sound_time = 0
         self.min_interval = 0.08
         self.lock = threading.Lock()
+        self._sound_cache = {}
 
     def play_wav(self, filename):
         """Play WAV file asynchronously without blocking UI."""
         path = os.path.join(SOUNDS_DIR, filename)
-        if os.path.exists(path):
+        if not os.path.exists(path):
+            return
+
+        # 1. Preferred: Kivy SoundLoader (Android, Linux, Windows)
+        if SoundLoader is not None:
+            try:
+                if filename not in self._sound_cache:
+                    snd = SoundLoader.load(path)
+                    if snd:
+                        self._sound_cache[filename] = snd
+                sound_obj = self._sound_cache.get(filename)
+                if sound_obj:
+                    sound_obj.stop()
+                    sound_obj.play()
+                    return
+            except Exception:
+                pass
+
+        # 2. Windows fallback: winsound
+        if winsound is not None:
             try:
                 winsound.PlaySound(path, winsound.SND_ASYNC | winsound.SND_FILENAME)
             except Exception as e:
@@ -124,6 +154,10 @@ class SoundManager:
             self.play_wav("beacon_lock.wav")
         else:
             self.play_wav("beacon_ping.wav")
+
+    def play_beep(self):
+        """Play a short alert or listen prompt chime."""
+        self.play_wav("beacon_ping.wav")
 
 
 # Global singleton instance

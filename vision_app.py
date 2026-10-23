@@ -39,6 +39,17 @@ from kivy.uix.label import Label
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.scrollview import ScrollView
+from kivy.core.text import LabelBase
+
+# Register Unicode & Devanagari font on Windows for crisp Hindi rendering
+for f in [r"C:\Windows\Fonts\mangal.ttf", r"C:\Windows\Fonts\aparaj.ttf"]:
+    if os.path.exists(f):
+        try:
+            fb = r"C:\Windows\Fonts\mangalb.ttf"
+            LabelBase.register(name="Roboto", fn_regular=f, fn_bold=fb if os.path.exists(fb) else f)
+            break
+        except Exception:
+            pass
 
 from settings import VisionSettings
 from settings_screen import SettingsScreen
@@ -46,6 +57,7 @@ from tts_engine import TTSEngine
 from sound_effects import sound_manager
 from face_engine import FaceAnalyzer
 from auth_screens import LanguageSelectionScreen, LoginScreen, SignupScreen
+from language_manager import language_manager, SUPPORTED_LANGUAGES
 
 # Paths to Lilac & Pink textures and sharp vector icons
 BASE_DIR = os.path.dirname(__file__)
@@ -65,6 +77,7 @@ ICON_STOP = os.path.join(BASE_DIR, "assets", "icons", "icon_stop.png")
 ICON_FIND = os.path.join(BASE_DIR, "assets", "icons", "icon_find.png")
 ICON_RADAR = os.path.join(BASE_DIR, "assets", "icons", "icon_radar.png")
 ICON_FACE = os.path.join(BASE_DIR, "assets", "icons", "icon_face.png")
+ICON_GLOBE = os.path.join(BASE_DIR, "assets", "icons", "icon_globe.png")
 
 # Lilac & Pink Theme Colors
 C_LILAC = (0.75, 0.52, 0.98, 1)          # #C084FC Soft Radiant Lilac
@@ -82,7 +95,7 @@ C_BORDER_DEFAULT = (0.40, 0.24, 0.56, 0.8)
 Window.size = (420, 780)
 Window.clearcolor = (0.07, 0.04, 0.11, 1)
 
-# Initialize AI Services
+# Initialize AI Services & Settings
 print("Initializing VisionAid AI engines...")
 model = YOLO("yolo11n.pt")
 print("YOLO ready")
@@ -90,8 +103,9 @@ print("YOLO ready")
 reader = easyocr.Reader(["en"], gpu=False)
 print("EasyOCR ready")
 
-tts = TTSEngine()
 settings = VisionSettings()
+language_manager.set_language(settings.language)
+tts = TTSEngine(language=settings.language)
 recognizer = sr.Recognizer()
 try:
     microphone = sr.Microphone()
@@ -103,6 +117,7 @@ except Exception as e:
 def speak(text, interrupt=False):
     """Global async speech helper."""
     tts.speak(text, interrupt=interrupt)
+
 
 
 # =====================================================================
@@ -355,6 +370,66 @@ class StatusPill(BoxLayout):
         return super().setter(name)
 
 
+class LanguagePillButton(ButtonBehavior, BoxLayout):
+    """An accessible pill button displaying active language badge and globe icon."""
+
+    def __init__(self, icon_path=None, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = "horizontal"
+        self.size_hint = (None, 1)
+        self.width = dp(64)
+        self.padding = [dp(6), dp(4), dp(6), dp(4)]
+        self.spacing = dp(4)
+
+        with self.canvas.before:
+            self.canvas_bg = Color(0.24, 0.14, 0.38, 0.95)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(14)])
+            self.canvas_border = Color(*C_BORDER_DEFAULT)
+            self.border_line = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(14)), width=1.3)
+
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        self.globe_icon = Image(
+            source=icon_path or ICON_GLOBE,
+            size_hint=(None, 1),
+            width=dp(16),
+            fit_mode="contain",
+            color=C_PINK
+        )
+        self.text_lbl = Label(
+            text="EN",
+            font_size=11,
+            bold=True,
+            color=C_TEXT_WHITE,
+            halign="center",
+            valign="middle"
+        )
+        self.add_widget(self.globe_icon)
+        self.add_widget(self.text_lbl)
+
+    def _update_canvas(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+        self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(14))
+
+    @property
+    def text(self):
+        return self.text_lbl.text
+
+    @text.setter
+    def text(self, val):
+        self.text_lbl.text = val
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            self.canvas_bg.rgba = (0.38, 0.20, 0.58, 1)
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        self.canvas_bg.rgba = (0.24, 0.14, 0.38, 0.95)
+        return super().on_touch_up(touch)
+
+
 class SettingsPillButton(ButtonBehavior, BoxLayout):
     """An elegant pill button displaying a glowing gear icon and SETTINGS text."""
 
@@ -362,9 +437,9 @@ class SettingsPillButton(ButtonBehavior, BoxLayout):
         super().__init__(**kwargs)
         self.orientation = "horizontal"
         self.size_hint = (None, 1)
-        self.width = dp(112)
-        self.padding = [dp(8), dp(6), dp(10), dp(6)]
-        self.spacing = dp(6)
+        self.width = dp(96)
+        self.padding = [dp(6), dp(6), dp(8), dp(6)]
+        self.spacing = dp(4)
 
         with self.canvas.before:
             self.canvas_bg = Color(0.24, 0.14, 0.38, 0.95)
@@ -377,7 +452,7 @@ class SettingsPillButton(ButtonBehavior, BoxLayout):
         self.gear_icon = Image(
             source=icon_path,
             size_hint=(None, 1),
-            width=dp(22),
+            width=dp(20),
             fit_mode="contain"
         )
         self.text_lbl = Label(
@@ -391,6 +466,7 @@ class SettingsPillButton(ButtonBehavior, BoxLayout):
 
         self.add_widget(self.gear_icon)
         self.add_widget(self.text_lbl)
+
 
     def _update_canvas(self, *args):
         self.bg_rect.pos = self.pos
@@ -464,8 +540,10 @@ class MainScreen(Screen):
 
         # Voice state
         self.listening = False
+        self.voice_state = "idle"
 
         self._build_ui()
+        self.update_language()
 
     def _build_ui(self):
         root_box = BoxLayout(orientation="vertical", padding=[dp(16), dp(14), dp(16), dp(16)], spacing=dp(10))
@@ -481,42 +559,49 @@ class MainScreen(Screen):
         # -------------------------------------------------------------
         # 1. TOP HEADER BAR
         # -------------------------------------------------------------
-        header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(50), spacing=dp(8))
+        header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(50), spacing=dp(6))
 
         # Brand Title
         brand_box = BoxLayout(orientation="vertical", size_hint=(1, 1), spacing=dp(1))
         app_title = Label(
             text="[b][color=C084FC]VISION[/color][color=F472B6]AID[/color][/b]",
             markup=True,
-            font_size=23,
+            font_size=22,
             halign="left",
             valign="bottom",
             size_hint=(1, 0.6)
         )
         app_title.bind(size=app_title.setter("text_size"))
 
-        app_subtitle = Label(
-            text="AI Accessibility Companion",
+        self.app_subtitle = Label(
+            text=language_manager.get_string("app_subtitle"),
             font_size=11,
             color=C_TEXT_MUTED,
             halign="left",
             valign="top",
             size_hint=(1, 0.4)
         )
-        app_subtitle.bind(size=app_subtitle.setter("text_size"))
+        self.app_subtitle.bind(size=self.app_subtitle.setter("text_size"))
 
         brand_box.add_widget(app_title)
-        brand_box.add_widget(app_subtitle)
+        brand_box.add_widget(self.app_subtitle)
 
         # Status Pill with Glowing Status Indicator Icon & Text
         self.status_pill = StatusPill(icon_path=ICON_STATUS)
+        self.status_pill.width = dp(84)
 
-        # Settings Button with Custom Gear Icon & Text (100% visible & properly laid out)
+        # Language Pill Button (Displays active language & allows 1-tap toggling)
+        self.lang_pill = LanguagePillButton(icon_path=ICON_GLOBE)
+        self.lang_pill.bind(on_press=self.cycle_language)
+
+        # Settings Button with Custom Gear Icon & Text
         settings_btn = SettingsPillButton(icon_path=ICON_SETTINGS)
+        settings_btn.width = dp(96)
         settings_btn.bind(on_press=self.open_settings)
 
         header.add_widget(brand_box)
         header.add_widget(self.status_pill)
+        header.add_widget(self.lang_pill)
         header.add_widget(settings_btn)
         root_box.add_widget(header)
 
@@ -531,7 +616,10 @@ class MainScreen(Screen):
             Color(0.55, 0.32, 0.75, 0.9)
             self.vp_border = Line(rounded_rectangle=(0, 0, viewport_wrapper.width, viewport_wrapper.height, dp(18)), width=1.5)
 
-        viewport_wrapper.bind(size=self._update_viewport_canvas)
+        viewport_wrapper.bind(size=lambda _, s: (
+            setattr(self.vp_bg, "size", s),
+            setattr(self.vp_border, "rounded_rectangle", (0, 0, s[0], s[1], dp(18)))
+        ))
 
         # Live Camera Texture Image
         self.camera_image = Image(
@@ -554,24 +642,24 @@ class MainScreen(Screen):
             size_hint=(1, 0.42),
             fit_mode="contain"
         )
-        ready_title = Label(
-            text="Vision Camera Standby",
+        self.ready_title = Label(
+            text=language_manager.get_string("cam_standby_title"),
             font_size=16,
             bold=True,
             color=C_TEXT_WHITE,
             size_hint=(1, 0.32),
             halign="center"
         )
-        ready_sub = Label(
-            text="Select an AI mode below to activate vision assistance",
+        self.ready_sub = Label(
+            text=language_manager.get_string("cam_standby_sub"),
             font_size=12,
             color=C_TEXT_MUTED,
             size_hint=(1, 0.26),
             halign="center"
         )
         self.placeholder.add_widget(cam_icon_img)
-        self.placeholder.add_widget(ready_title)
-        self.placeholder.add_widget(ready_sub)
+        self.placeholder.add_widget(self.ready_title)
+        self.placeholder.add_widget(self.ready_sub)
 
         # Mode Chip (Floating top-left badge)
         self.mode_chip = Label(
@@ -650,18 +738,9 @@ class MainScreen(Screen):
             subtitle="Auditory radar beacon guides you directly to items",
             accent_color=C_FIND
         )
-        self.card_find.bind(on_press=lambda _: self.start_mode("find"))
+        self.card_find.bind(on_press=self.on_find_card_pressed)
         card_list.add_widget(self.card_find)
 
-        # Card 3: Spatial Audio Radar (Sky Lilac Blue - Option 3)
-        self.card_radar = GradientActionCard(
-            icon_path=ICON_RADAR,
-            title="Spatial Audio Radar",
-            subtitle="Directional stereo pulses alert to obstacles without speech",
-            accent_color=C_RADAR
-        )
-        self.card_radar.bind(on_press=lambda _: self.start_mode("radar"))
-        card_list.add_widget(self.card_radar)
 
         # Card 4: Face & Emotion Companion (Celestial Violet - Option 6)
         self.card_face = GradientActionCard(
@@ -718,9 +797,76 @@ class MainScreen(Screen):
 
         self.add_widget(root_box)
 
-    def _update_viewport_canvas(self, instance, value):
-        self.vp_bg.size = instance.size
-        self.vp_border.rounded_rectangle = (0, 0, instance.width, instance.height, dp(18))
+    def _update_viewport_canvas(self, instance, size):
+        if hasattr(self, "vp_bg"):
+            self.vp_bg.size = size
+        if hasattr(self, "vp_border"):
+            self.vp_border.rounded_rectangle = (0, 0, size[0], size[1], dp(18))
+
+    def on_enter(self):
+        """Called automatically when MainScreen is presented."""
+        self.update_language()
+
+    def cycle_language(self, *args):
+        """Quick 1-tap language toggle from top bar (e.g. English <-> Hindi)."""
+        langs = [l["code"] for l in SUPPORTED_LANGUAGES]
+        cur = settings.language or "en"
+        next_idx = (langs.index(cur) + 1) % len(langs) if cur in langs else 0
+        new_lang = langs[next_idx]
+        settings.set_language(new_lang)
+        language_manager.set_language(new_lang)
+        tts.set_language(new_lang)
+        self.update_language()
+        info = language_manager.get_language_info(new_lang)
+        speak(info["confirmation"], interrupt=True)
+
+    def update_language(self):
+        """Synchronize all dashboard cards, headers, and banners with current language."""
+        lang = settings.language or "en"
+        language_manager.set_language(lang)
+        tts.set_language(lang)
+
+        lang_info = language_manager.get_language_info(lang)
+        if hasattr(self, "lang_pill"):
+            self.lang_pill.text = lang_info["badge"]
+
+        if hasattr(self, "app_subtitle"):
+            self.app_subtitle.text = language_manager.get_string("app_subtitle", lang)
+
+        if hasattr(self, "ready_title"):
+            self.ready_title.text = language_manager.get_string("cam_standby_title", lang)
+        if hasattr(self, "ready_sub"):
+            self.ready_sub.text = language_manager.get_string("cam_standby_sub", lang)
+
+        if self.mode is None:
+            if hasattr(self, "status_pill"):
+                self.status_pill.text = "● " + language_manager.get_string("status_standby", lang)
+            if hasattr(self, "hud_banner"):
+                self.hud_banner.text = language_manager.get_string("banner_standby", lang)
+
+        # Update action cards
+        if hasattr(self, "card_find"):
+            self.card_find.title_lbl.text = language_manager.get_string("card_find_title", lang)
+            self.card_find.desc_lbl.text = language_manager.get_string("card_find_sub", lang)
+        if hasattr(self, "card_object"):
+            self.card_object.title_lbl.text = language_manager.get_string("card_object_title", lang)
+            self.card_object.desc_lbl.text = language_manager.get_string("card_object_sub", lang)
+
+        if hasattr(self, "card_face"):
+            self.card_face.title_lbl.text = language_manager.get_string("card_face_title", lang)
+            self.card_face.desc_lbl.text = language_manager.get_string("card_face_sub", lang)
+        if hasattr(self, "card_text"):
+            self.card_text.title_lbl.text = language_manager.get_string("card_text_title", lang)
+            self.card_text.desc_lbl.text = language_manager.get_string("card_text_sub", lang)
+        if hasattr(self, "card_obstacle"):
+            self.card_obstacle.title_lbl.text = language_manager.get_string("card_obstacle_title", lang)
+            self.card_obstacle.desc_lbl.text = language_manager.get_string("card_obstacle_sub", lang)
+        if hasattr(self, "card_voice"):
+            self.card_voice.title_lbl.text = language_manager.get_string("card_voice_title", lang)
+            self.card_voice.desc_lbl.text = language_manager.get_string("card_voice_sub", lang)
+        if hasattr(self, "card_stop"):
+            self.card_stop.title_lbl.text = language_manager.get_string("card_stop_title", lang)
+            self.card_stop.desc_lbl.text = language_manager.get_string("card_stop_sub", lang)
 
     # =================================================================
     # NAVIGATION
@@ -744,10 +890,11 @@ class MainScreen(Screen):
 
         if not self.camera.is_opened():
             print("❌ Camera could not be opened")
-            self.hud_banner.text = "Error: Could not access camera."
-            self.status_pill.text = "● CAM ERROR"
+            err_msg = language_manager.get_string("camera_error")
+            self.hud_banner.text = err_msg
+            self.status_pill.text = "● " + language_manager.get_string("status_cam_error")
             self.status_pill.color = C_CRIMSON
-            speak("Could not access camera device", interrupt=True)
+            speak(err_msg, interrupt=True)
             self.camera = None
             return False
 
@@ -772,9 +919,9 @@ class MainScreen(Screen):
         self.placeholder.opacity = 1
         self.mode_chip.opacity = 0
 
-        self.status_pill.text = "● STANDBY"
+        self.status_pill.text = "● " + language_manager.get_string("status_standby")
         self.status_pill.color = C_LILAC
-        self.hud_banner.text = "Camera stopped. Ready to assist."
+        self.hud_banner.text = language_manager.get_string("banner_standby")
 
         # Reset card highlights
         self.card_object.set_active(False)
@@ -786,7 +933,8 @@ class MainScreen(Screen):
         self.card_voice.set_active(False)
 
         tts.stop()
-        speak("Camera stopped", interrupt=True)
+        speak(language_manager.get_string("camera_stopped"), interrupt=True)
+
 
     def _start_inference_worker(self):
         if self.inference_running:
@@ -817,7 +965,7 @@ class MainScreen(Screen):
                 break
 
             mode_to_process = self.mode
-            if mode_to_process not in ("object", "obstacle", "find", "radar", "face"):
+            if mode_to_process not in ("object", "obstacle", "find", "face"):
                 time.sleep(0.02)
                 continue
 
@@ -835,7 +983,7 @@ class MainScreen(Screen):
             frame_area = float(w * h)
 
             try:
-                if mode_to_process in ("object", "obstacle", "find", "radar"):
+                if mode_to_process in ("object", "obstacle", "find"):
                     # Fast CPU inference at 320px (~30ms) with conf=0.45 to eliminate false positives
                     results = model(frame_to_process, imgsz=320, conf=0.45, verbose=False)
 
@@ -907,7 +1055,14 @@ class MainScreen(Screen):
     # MODE SWITCHING
     # =================================================================
 
-    def start_mode(self, mode):
+    def on_find_card_pressed(self, *args):
+        """Card 2 click: prompt the user for what object to find, or fallback gracefully."""
+        if not settings.voice_enabled or microphone is None:
+            self.start_mode("find", target=self.find_target or "cup")
+            return
+        self.ask_what_to_find()
+
+    def start_mode(self, mode, target=None):
         # 1. Immediately silence previous speech & cancel in-flight tasks
         tts.stop()
         self.ocr_session_id += 1
@@ -940,7 +1095,6 @@ class MainScreen(Screen):
         # Update card highlights
         self.card_object.set_active(mode == "object")
         self.card_find.set_active(mode == "find")
-        self.card_radar.set_active(mode == "radar")
         self.card_face.set_active(mode == "face")
         self.card_text.set_active(mode == "text")
         self.card_obstacle.set_active(mode == "obstacle")
@@ -948,53 +1102,58 @@ class MainScreen(Screen):
 
         self.mode_chip.opacity = 1
 
+        lang = settings.language
         if mode == "object":
-            self.status_pill.text = "● OBJECTS"
+            title = language_manager.get_string("card_object_title", lang)
+            self.status_pill.text = "● " + title
             self.status_pill.color = C_LILAC
-            self.mode_chip.text = "OBJECT DETECTION"
+            self.mode_chip.text = title.upper()
             self.mode_chip.color = C_LILAC
-            self.hud_banner.text = "Scanning surroundings for objects..."
-            speak("Object detection started", interrupt=True)
+            self.hud_banner.text = language_manager.get_string("banner_detecting", lang)
+            speak(language_manager.get_string("mode_object", lang), interrupt=True)
 
         elif mode == "find":
-            self.status_pill.text = "● RADAR BEACON"
+            if target:
+                self.find_target = target
+            title = language_manager.get_string("card_find_title", lang)
+            tgt_trans = language_manager.translate_label(self.find_target, lang)
+            self.status_pill.text = "● " + title
             self.status_pill.color = C_FIND
-            self.mode_chip.text = f"FIND: {self.find_target.upper()}"
+            self.mode_chip.text = f"{title.upper()}: {tgt_trans.upper()}"
             self.mode_chip.color = C_FIND
-            self.hud_banner.text = f"Auditory beacon active. Pan camera to find {self.find_target}..."
-            speak(f"Find my object started. Searching for {self.find_target}. Pan camera slowly.", interrupt=True)
-
-        elif mode == "radar":
-            self.status_pill.text = "● SPATIAL RADAR"
-            self.status_pill.color = C_RADAR
-            self.mode_chip.text = "SPATIAL AUDIO RADAR"
-            self.mode_chip.color = C_RADAR
-            self.hud_banner.text = "Spatial radar active. Stereo tones indicate obstacles..."
-            speak("Spatial audio radar activated. Listen for left and right acoustic cues.", interrupt=True)
+            self.hud_banner.text = f"{title}: {tgt_trans}..."
+            # Announce search prompt once at mode start
+            search_prompt = language_manager.format_search_prompt(self.find_target, lang)
+            speak(search_prompt, interrupt=True)
+            self.last_target_spoken_time = time.time()
 
         elif mode == "face":
-            self.status_pill.text = "● FACE & EMOTION"
+            title = language_manager.get_string("card_face_title", lang)
+            self.status_pill.text = "● " + title
             self.status_pill.color = C_FACE
-            self.mode_chip.text = "FACE & EMOTION COMPANION"
+            self.mode_chip.text = title.upper()
             self.mode_chip.color = C_FACE
-            self.hud_banner.text = "Scanning for companions, familiar faces and expressions..."
-            speak("Face and emotion companion started. Point camera towards people.", interrupt=True)
+            self.hud_banner.text = language_manager.get_string("banner_face", lang)
+            speak(language_manager.get_string("mode_face", lang), interrupt=True)
 
         elif mode == "text":
-            self.status_pill.text = "● TEXT OCR"
+            title = language_manager.get_string("card_text_title", lang)
+            self.status_pill.text = "● " + title
             self.status_pill.color = C_PINK
-            self.mode_chip.text = "READ TEXT"
+            self.mode_chip.text = title.upper()
             self.mode_chip.color = C_PINK
-            self.hud_banner.text = "Point camera at any printed text..."
-            speak("Text reader started", interrupt=True)
+            self.hud_banner.text = language_manager.get_string("banner_reading", lang)
+            speak(language_manager.get_string("mode_text", lang), interrupt=True)
 
         elif mode == "obstacle":
-            self.status_pill.text = "● OBSTACLES"
+            title = language_manager.get_string("card_obstacle_title", lang)
+            self.status_pill.text = "● " + title
             self.status_pill.color = C_ROSE
-            self.mode_chip.text = "OBSTACLE GUIDANCE"
+            self.mode_chip.text = title.upper()
             self.mode_chip.color = C_ROSE
-            self.hud_banner.text = "Monitoring path for obstacles..."
-            speak("Obstacle guidance started", interrupt=True)
+            self.hud_banner.text = language_manager.get_string("banner_monitoring", lang)
+            speak(language_manager.get_string("mode_obstacle", lang), interrupt=True)
+
 
         Clock.unschedule(self.update_camera)
         Clock.schedule_interval(self.update_camera, 1.0 / 30.0)
@@ -1018,9 +1177,9 @@ class MainScreen(Screen):
         fh, fw = display_frame.shape[:2]
 
         # -------------------------------------------------------------
-        # OBJECT, OBSTACLE, RADAR & FIND DETECTION (Non-blocking background feed)
+        # OBJECT, OBSTACLE & FIND DETECTION (Non-blocking background feed)
         # -------------------------------------------------------------
-        if self.mode in ("object", "obstacle", "radar", "find"):
+        if self.mode in ("object", "obstacle", "find"):
             # Queue frame for background inference
             with self.detections_lock:
                 if self.latest_frame_for_inference is None:
@@ -1028,7 +1187,7 @@ class MainScreen(Screen):
                     self.frame_available_event.set()
                 current_dets = list(self.latest_detections)
 
-            if self.mode in ("object", "obstacle", "radar"):
+            if self.mode in ("object", "obstacle"):
                 for d in current_dets:
                     x1, y1, x2, y2 = d["bbox"]
                     x1 = max(0, min(fw, x1))
@@ -1036,14 +1195,9 @@ class MainScreen(Screen):
                     x2 = max(0, min(fw, x2))
                     y2 = max(0, min(fh, y2))
 
-                    if self.mode == "radar":
-                        color = (250, 199, 107)  # Sky Lilac / Cyan in BGR
-                        pos_indicator = "C" if d["position"] == "center" else ("L" if d["position"] == "left" else "R")
-                        lbl = f"{d['name']} [RADAR: {pos_indicator}]"
-                    else:
-                        color = (244, 114, 182) if d["position"] == "center" else (192, 132, 252) # BGR
-                        pos_indicator = "C" if d["position"] == "center" else ("L" if d["position"] == "left" else "R")
-                        lbl = f"{d['name']} [{pos_indicator}]"
+                    color = (244, 114, 182) if d["position"] == "center" else (192, 132, 252) # BGR
+                    pos_indicator = "C" if d["position"] == "center" else ("L" if d["position"] == "left" else "R")
+                    lbl = f"{d['name']} [{pos_indicator}]"
 
                     cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
                     (tw, th), _ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
@@ -1177,7 +1331,7 @@ class MainScreen(Screen):
             full_text = " ".join(detected_text)
             self.hud_banner.text = f"Read: {full_text[:50]}..."
             if full_text != self.last_read_text:
-                speak("I can read: " + full_text)
+                speak(language_manager.format_text_reading(full_text))
                 self.last_read_text = full_text
         else:
             self.hud_banner.text = "Scanning for text..."
@@ -1193,13 +1347,14 @@ class MainScreen(Screen):
         now = time.time()
         if mode == "object":
             if not detections:
-                self.hud_banner.text = "Scanning surroundings for objects..."
+                self.hud_banner.text = language_manager.get_string("banner_detecting")
                 return
 
             hud_items = []
             for d in detections[:3]:
+                trans_name = language_manager.translate_label(d["name"])
                 pos_str = "in front" if d["position"] == "center" else d["position"]
-                hud_items.append(f"{d['name'].capitalize()} ({pos_str}, {d['proximity']})")
+                hud_items.append(f"{trans_name} ({pos_str})")
             self.hud_banner.text = " • ".join(hud_items)
 
             unique_top = []
@@ -1220,7 +1375,7 @@ class MainScreen(Screen):
 
         elif mode == "obstacle":
             if not detections:
-                self.hud_banner.text = "Path appears clear"
+                self.hud_banner.text = "Path appears clear" if settings.language != "hi" else "रास्ता साफ है"
                 return
 
             def obstacle_priority(d):
@@ -1237,11 +1392,11 @@ class MainScreen(Screen):
 
             is_warning = ratio >= settings.obstacle_threshold or (pos == "center" and ratio >= 0.12)
             if is_warning:
-                message = f"Warning! {obj_name} is very close {pos_desc}."
+                message = language_manager.format_obstacle_warning(obj_name, pos=pos_desc, dist="very close")
             elif ratio >= 0.05:
-                message = f"Caution, {obj_name} nearby {pos_desc}."
+                message = language_manager.format_detection(obj_name, dist="close", pos=pos_desc)
             else:
-                message = f"{obj_name.capitalize()} {pos_desc}."
+                message = language_manager.format_detection(obj_name, dist="ahead", pos=pos_desc)
 
             self.hud_banner.text = message
             if message != self.last_obstacle_message and (now - self.last_obstacle_time >= self.obstacle_interval):
@@ -1249,31 +1404,14 @@ class MainScreen(Screen):
                 self.last_obstacle_message = message
                 self.last_obstacle_time = now
 
-        elif mode == "radar":
-            if not detections:
-                self.hud_banner.text = "Path appears clear • No obstacles detected"
-                return
-
-            def obstacle_priority(d):
-                score = d["area_ratio"]
-                if d["position"] == "center":
-                    score += 0.25
-                return score
-
-            critical = max(detections, key=obstacle_priority)
-            pos = critical["position"]
-            obj_name = critical["name"]
-            prox = critical["proximity"]
-
-            # Directional stereo radar pulse
-            sound_manager.play_spatial_radar(pos)
-            self.hud_banner.text = f"Radar Tone: {obj_name.capitalize()} on {pos.upper()} ({prox})"
 
         elif mode == "find":
             target = self.find_target.lower().strip()
             synonyms = {
                 "phone": ["cell phone", "phone", "telephone"],
                 "mobile": ["cell phone", "phone"],
+                "pen": ["toothbrush", "scissors", "remote", "cell phone", "fork", "knife", "pen"],
+                "pencil": ["toothbrush", "scissors", "remote", "pencil"],
                 "bottle": ["bottle", "wine glass", "cup"],
                 "cup": ["cup", "bottle", "bowl", "mug"],
                 "glasses": ["glasses", "sunglasses"],
@@ -1282,16 +1420,23 @@ class MainScreen(Screen):
                 "computer": ["laptop", "tv", "keyboard", "mouse"],
                 "laptop": ["laptop"],
                 "person": ["person"],
-                "chair": ["chair", "couch", "bench"]
+                "chair": ["chair", "couch", "bench"],
+                "book": ["book"],
+                "notebook": ["book"],
+                "copy": ["book"]
             }
             candidates = synonyms.get(target, [target])
 
             matching = [d for d in detections if any(cand in d["name"].lower() for cand in candidates)]
             if not matching:
                 self.target_locked = False
-                self.hud_banner.text = f"Searching for {self.find_target}... Pan camera slowly"
-                if now - self.last_target_spoken_time >= 5.0:
-                    speak(f"Searching for {self.find_target}. Pan camera slowly.")
+                tgt_trans = language_manager.translate_label(self.find_target)
+                self.hud_banner.text = f"Searching for {tgt_trans}... Pan camera slowly"
+                # DO NOT repeat speaking every 5 seconds! Keep audio quiet while user pans camera.
+                # Only give a quiet reminder if searching for over 45 seconds without any detection.
+                if now - self.last_target_spoken_time >= 45.0:
+                    search_msg = language_manager.format_search_prompt(self.find_target)
+                    speak(search_msg)
                     self.last_target_spoken_time = now
                 return
 
@@ -1307,16 +1452,21 @@ class MainScreen(Screen):
             sound_manager.play_beacon(is_locked=is_locked)
 
             if is_locked:
-                self.hud_banner.text = f"TARGET LOCKED! {best['name'].capitalize()} is directly in front of you."
-                if now - self.last_target_spoken_time >= 3.0 or self.last_target_spoken_msg != "locked":
-                    speak(f"Target locked! {best['name']} is directly in front of you.", interrupt=True)
+                tgt_trans = language_manager.translate_label(best["name"])
+                self.hud_banner.text = f"TARGET LOCKED! {tgt_trans} is directly in front of you."
+                if (now - self.last_target_spoken_time >= 3.5) or (self.last_target_spoken_msg != "locked" and now - self.last_target_spoken_time >= 2.0):
+                    msg = language_manager.format_target_found(best["name"], pos="directly in front of you", dist="close")
+                    speak(msg, interrupt=True)
                     self.last_target_spoken_time = now
                     self.last_target_spoken_msg = "locked"
             else:
                 dir_cue = "left" if offset < 0 else "right"
-                self.hud_banner.text = f"Target Detected: {best['name'].capitalize()} • Move camera {dir_cue.upper()}"
-                if now - self.last_target_spoken_time >= 3.2 or self.last_target_spoken_msg != dir_cue:
-                    speak(f"{best['name']} is on your {dir_cue}. Move camera {dir_cue}.")
+                pos_desc = f"on your {dir_cue}"
+                tgt_trans = language_manager.translate_label(best["name"])
+                self.hud_banner.text = f"Target Detected: {tgt_trans} • Move camera {dir_cue.upper()}"
+                if (now - self.last_target_spoken_time >= 3.5) or (self.last_target_spoken_msg != dir_cue and now - self.last_target_spoken_time >= 2.5):
+                    msg = language_manager.format_target_found(best["name"], pos=pos_desc, dist="close")
+                    speak(msg)
                     self.last_target_spoken_time = now
                     self.last_target_spoken_msg = dir_cue
 
@@ -1334,13 +1484,24 @@ class MainScreen(Screen):
         primary = faces[0]
         speech_key = f"{primary['name']}_{primary['emotion']}_{primary['position']}"
         if speech_key != self.last_spoken_face and (now - self.last_face_speech_time >= 3.5):
-            speak(primary["description"])
+            msg = language_manager.format_face_found(primary["name"], primary["position"])
+            speak(msg)
             self.last_spoken_face = speech_key
             self.last_face_speech_time = now
 
     def _create_spatial_sentence(self, detections):
         if not detections:
-            return "I do not see any objects nearby."
+            return "I do not see any objects nearby." if settings.language != "hi" else "आस-पास कोई वस्तु नहीं दिख रही है।"
+
+        lang = settings.language
+        if lang == "hi":
+            phrases = []
+            for d in detections:
+                lbl = language_manager.translate_label(d["name"], "hi")
+                p = language_manager.translate_position("directly in front of you" if d["position"] == "center" else f"on your {d['position']}", "hi")
+                dist = language_manager.translate_distance(d["proximity"], "hi")
+                phrases.append(f"{p} {lbl}")
+            return "मुझे " + ", और ".join(phrases) + " दिख रहे हैं।"
 
         phrases = []
         for d in detections:
@@ -1370,14 +1531,17 @@ class MainScreen(Screen):
         else:
             return f"I see {phrases[0]}, {phrases[1]}, and {phrases[2]}."
 
+
     # =================================================================
     # VOICE RECOGNITION
     # =================================================================
 
     def start_voice_command(self, instance=None):
         if not settings.voice_enabled:
-            self.hud_banner.text = "Voice commands are disabled in Settings."
-            speak("Voice commands are disabled in settings", interrupt=True)
+            lang = settings.language
+            msg = language_manager.get_string("voice_disabled", lang)
+            self.hud_banner.text = msg
+            speak(msg, interrupt=True)
             return
 
         if self.listening:
@@ -1388,63 +1552,247 @@ class MainScreen(Screen):
             speak("Microphone is unavailable", interrupt=True)
             return
 
+        self.voice_state = "idle"
         self.listening = True
         self.card_voice.set_active(True)
-        self.status_pill.text = "● LISTENING"
+        lang = settings.language
+        self.status_pill.text = "● " + language_manager.get_string("listening", lang).upper()
         self.status_pill.color = C_MAGENTA
-        self.hud_banner.text = "Listening for command... ('find cup', 'radar', 'face')"
-        speak("Listening", interrupt=True)
+        hud_listen = "Listening for command... ('find phone', 'read text', 'face')" if lang != "hi" else "कमांड सुन रहे हैं... ('फोन ढूंढो', 'टेक्स्ट पढ़ो', 'चेहरा')"
+        self.hud_banner.text = hud_listen
+        speak(language_manager.get_string("listening", lang), interrupt=True)
 
+        threading.Thread(target=self._listen_worker, daemon=True).start()
+
+    def ask_what_to_find(self):
+        """Asks the user what object they want to find, and listens for their answer."""
+        lang = settings.language
+        prompt = language_manager.get_ask_what_to_find(lang)
+        self.voice_state = "awaiting_find_target"
+        self.hud_banner.text = prompt
+        self.status_pill.text = "● " + language_manager.get_string("card_find_title", lang)
+        self.status_pill.color = C_FIND
+        speak(prompt, interrupt=True)
+        Clock.schedule_once(lambda dt: self._start_listen_for_target(), 1.5)
+
+    def _start_listen_for_target(self):
+        if microphone is None:
+            self.start_mode("find", target=self.find_target or "cup")
+            return
+        self.listening = True
+        self.card_voice.set_active(True)
+        lang = settings.language
+        self.status_pill.text = "● " + language_manager.get_string("listening", lang).upper()
+        self.status_pill.color = C_MAGENTA
+        prompt_sub = "बोलें: फोन, बोतल, कप, पेन, चाबी..." if lang == "hi" else "Say: phone, bottle, cup, pen, keys..."
+        self.hud_banner.text = prompt_sub
         threading.Thread(target=self._listen_worker, daemon=True).start()
 
     def _listen_worker(self):
         try:
-            with microphone as source:
-                recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
+            # 1. Give time for any prior announcement to finish so microphone doesn't capture TTS output!
+            time.sleep(1.1)
+            tts.stop()
+            time.sleep(0.15)
+            sound_manager.play_beep()
 
-            text = recognizer.recognize_google(audio).lower().strip()
-            print("Voice Command recognized:", text)
-            Clock.schedule_once(lambda dt: self._process_voice_command(text))
+            with microphone as source:
+                recognizer.adjust_for_ambient_noise(source, duration=0.35)
+                recognizer.pause_threshold = 1.0
+                audio = recognizer.listen(source, timeout=8, phrase_time_limit=10)
+
+            sr_lang = language_manager.get_sr_language(settings.language)
+            text = None
+            try:
+                text = recognizer.recognize_google(audio, language=sr_lang).lower().strip()
+            except Exception:
+                text = None
+
+            # Fallback 1: Alternate language model (Hindi <-> English India)
+            if not text:
+                alt_lang = "en-IN" if sr_lang.startswith("hi") else "hi-IN"
+                try:
+                    text = recognizer.recognize_google(audio, language=alt_lang).lower().strip()
+                except Exception:
+                    text = None
+
+            # Fallback 2: Universal English (en-US)
+            if not text:
+                try:
+                    text = recognizer.recognize_google(audio, language="en-US").lower().strip()
+                except Exception:
+                    text = None
+
+            if not text:
+                lang = settings.language
+                if lang == "hi":
+                    msg = "आवाज़ स्पष्ट नहीं आई। कृपया दोबारा बोलें।"
+                else:
+                    msg = "Could not understand audio. Please try speaking again."
+                Clock.schedule_once(lambda dt, m=msg: self._voice_feedback(m))
+                return
+
+            print(f"Voice Command recognized ({sr_lang}):", text)
+            Clock.schedule_once(lambda dt, cmd=text: self._process_voice_command(cmd))
 
         except sr.WaitTimeoutError:
-            Clock.schedule_once(lambda dt: self._voice_feedback("No speech detected."))
+            lang = settings.language
+            timeout_msg = "No speech detected." if lang != "hi" else "कोई आवाज़ नहीं सुनाई दी।"
+            Clock.schedule_once(lambda dt, m=timeout_msg: self._voice_feedback(m))
         except sr.UnknownValueError:
-            Clock.schedule_once(lambda dt: self._voice_feedback("Sorry, command not understood."))
+            lang = settings.language
+            if lang == "hi":
+                unknown_msg = "आवाज़ समझ नहीं आई। बोलें: पेन ढूंढो, क्या दिख रहा है, या टेक्स्ट पढ़ो।"
+            else:
+                unknown_msg = "Could not understand. Say: find pen, what can you see, or read text."
+            Clock.schedule_once(lambda dt, m=unknown_msg: self._voice_feedback(m))
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._voice_feedback(f"Voice error: {str(e)[:30]}"))
+            err_msg = str(e)[:30]
+            Clock.schedule_once(lambda dt, m=err_msg: self._voice_feedback(f"Voice error: {m}"))
 
     def _process_voice_command(self, text):
         self.listening = False
         self.card_voice.set_active(False)
+        lang = settings.language
 
-        if any(w in text for w in ["find", "locate", "where is", "search for"]):
-            # Extract target object name
-            target = "cup"
-            for trigger in ["find", "locate", "where is my", "where is", "search for"]:
-                if trigger in text:
-                    parts = text.split(trigger, 1)
-                    cand = parts[1].replace("my", "").replace("the", "").replace("a", "").strip()
-                    if cand:
-                        target = cand.split()[0]
-                    break
+        if not text:
+            return
+
+        text = str(text).lower().strip()
+        print(f"Processing Voice Command ({lang}): '{text}'")
+
+        # Multi-turn conversation: awaiting specific target object to find
+        if getattr(self, "voice_state", "idle") == "awaiting_find_target":
+            self.voice_state = "idle"
+            target = language_manager.resolve_target_label(text, lang)
             self.find_target = target
-            self.start_mode("find")
-        elif any(w in text for w in ["radar", "spatial audio", "sonar", "audio radar"]):
-            self.start_mode("radar")
-        elif any(w in text for w in ["face", "faces", "emotion", "who is here", "who is that", "companion"]):
-            self.start_mode("face")
-        elif any(w in text for w in ["what can you see", "detect objects", "object", "objects", "see"]):
-            self.start_mode("object")
-        elif any(w in text for w in ["read text", "read this", "read", "text", "ocr"]):
-            self.start_mode("text")
-        elif any(w in text for w in ["obstacle", "obstacles", "walk", "navigation", "danger"]):
-            self.start_mode("obstacle")
-        elif any(w in text for w in ["stop", "close camera", "exit", "pause"]):
+            self.start_mode("find", target=target)
+            return
+
+        # 1. Camera Start triggers
+        start_camera_keywords = [
+            "start camera", "open camera", "turn on camera", "camera on", "start", "open",
+            "camera chalu", "chalu karo", "camera on karo", "camera shuru", "shuru karo", "camera kholo",
+            "कैमरा चालू", "चालू करो", "कैमरा खोलो", "शुरू करो", "कैमरा ऑन"
+        ]
+        if any(w in text for w in start_camera_keywords):
+            self.start_camera()
+            return
+
+        # 2. Stop / Close camera triggers
+        stop_keywords = [
+            "stop", "close camera", "exit", "pause", "shut down", "turn off", "quit",
+            "band karo", "ruko", "ruk jao", "chhod do", "khatam", "band",
+            "बंद करो", "रुक जाओ", "बंद", "रोको"
+        ]
+        if any(w in text for w in stop_keywords):
             self.stop_camera()
+            return
+
+        # 3. Help & Greetings triggers
+        help_keywords = [
+            "help", "madad", "what can you do", "what can i say", "kya kar sakte ho", "kya bolu",
+            "hello", "hi", "namaste", "मदद", "नमस्ते", "सहायता"
+        ]
+        if any(w in text for w in help_keywords):
+            if lang == "hi":
+                help_msg = "मैं आपकी सहायता के लिए तैयार हूँ। आप बोल सकते हैं: क्या दिख रहा है, पेन ढूंढो, टेक्स्ट पढ़ो, या बाधा मार्गदर्शन।"
+            else:
+                help_msg = "I am ready to help. You can say: what can you see, find pen, read text, obstacle guidance, or stop camera."
+            self._voice_feedback(help_msg)
+            return
+
+        # 4. Read Text (OCR) triggers
+        read_keywords = [
+            "read text", "read this", "read", "reading", "text", "ocr", "sign", "document", "page",
+            "padho", "padh do", "kya likha", "likha hua", "padh kar", "padhna", "padhke", "padhiye",
+            "पढ़ो", "पढ़", "पढ़िए", "क्या लिखा है", "टेक्स्ट", "किताब पढ़ो", "दस्तावेज़"
+        ]
+        if any(w in text for w in read_keywords) and not any(w in text for w in ["find", "search", "dhund", "khoj", "ढूंढ", "खोज"]):
+            self.start_mode("text")
+            return
+
+        # 5. Face / Emotion Companion triggers
+        face_keywords = [
+            "face", "faces", "emotion", "companion", "who is that", "who is here", "identify person",
+            "chehra", "kaun hai", "pehchano", "insan", "dost",
+            "चेहरा", "कौन है", "पहचानो", "इंसान", "दोस्त", "साथी"
+        ]
+        if any(w in text for w in face_keywords) and not any(w in text for w in ["find", "search", "dhund", "khoj", "ढूंढ", "खोज"]):
+            self.start_mode("face")
+            return
+
+        # 6. Obstacle / Safety Guidance triggers
+        obstacle_keywords = [
+            "obstacle", "obstacles", "walk", "walking", "navigation", "danger", "hazard", "safety", "warning",
+            "khatra", "badha", "rasta", "chalo", "chalna", "alert", "guidance", "rasta batao", "rasta dikhao",
+            "बाधा", "खतरा", "रास्ता", "अलर्ट", "नेविगेशन", "सावधानी", "मार्गदर्शन"
+        ]
+        if any(w in text for w in obstacle_keywords) and not any(w in text for w in ["find", "search", "dhund", "khoj", "ढूंढ", "खोज"]):
+            self.start_mode("obstacle")
+            return
+
+        # 7. Object Detection triggers
+        object_keywords = [
+            "what can you see", "detect objects", "object detection", "what is around", "what is in front",
+            "kya dikh raha hai", "kya hai samne", "samne kya hai", "vastu", "dekho", "dekhiye", "batao kya hai", "kuch dikh raha hai",
+            "surroundings", "aaspas", "dikh raha",
+            "वस्तु", "क्या दिख रहा", "सामने क्या है", "बताओ", "देखो", "आसपास"
+        ]
+        if any(w in text for w in object_keywords) and not any(w in text for w in ["find", "search", "dhund", "khoj", "ढूंढ", "खोज"]):
+            self.start_mode("object")
+            return
+
+        # 8. Find / Search intent triggers (includes "search", "find", "dhundho", etc.)
+        find_triggers = [
+            "find", "search", "locate", "where is", "look for", "get me", "track",
+            "dhundho", "dhundo", "dhund do", "dhund de", "dhund", "khojo", "khoj do", "khoj", "kahan hai", "kidhar hai", "lao", "dikhao",
+            "ढूंढो", "ढूंढ दो", "ढूंढ दे", "ढूंढ", "खोजो", "खोज दो", "खोज", "कहाँ है", "किधर है", "कहा है", "कहाँ", "लाओ", "दिखाओ",
+            "buscar", "dónde está", "donde esta", "trouver", "cherche"
+        ]
+
+        has_find_trigger = any(w in text for w in find_triggers)
+        detected_object = language_manager.detect_object_in_text(text)
+
+        if has_find_trigger or detected_object:
+            # If an explicit object was detected (e.g. "pen", "book", "bottle", "mobile"):
+            if detected_object:
+                self.find_target = detected_object
+                self.start_mode("find", target=detected_object)
+                return
+
+            # Check if user asked to find without naming an object
+            cleaned = text
+            for trig in find_triggers:
+                cleaned = cleaned.replace(trig, " ")
+            for sw in ["please", "my", "the", "a", "an", "mera", "meri", "mere", "apna", "apni", "mujhe", "chahiye", "do", "karo", "मेरा", "मेरी", "मेरे", "मुझे", "दो", "कृपया"]:
+                cleaned = cleaned.replace(sw, " ")
+            cleaned = " ".join(cleaned.split())
+
+            if not cleaned or len(cleaned) <= 1:
+                # User asked to find something without specifying what! Ask them!
+                self.ask_what_to_find()
+                return
+
+            # Otherwise resolve whatever remaining text they said
+            target = language_manager.resolve_target_label(cleaned, lang)
+            self.find_target = target
+            self.start_mode("find", target=target)
+            return
+
+        # 9. Fallback: If any single word or phrase was spoken, treat it as an object to find rather than failing
+        target = language_manager.resolve_target_label(text, lang)
+        if target and target not in ["unknown", "unrecognized", "what"]:
+            self.find_target = target
+            self.start_mode("find", target=target)
+            return
+
+        # Helpful fallback message
+        if lang == "hi":
+            feedback = "बोलें: पेन ढूंढो, क्या दिख रहा है, टेक्स्ट पढ़ो, या बाधा मार्गदर्शन।"
         else:
-            self.hud_banner.text = f"Unrecognized: '{text}'"
-            speak("Sorry, command not recognized")
+            feedback = "Say: find pen, what can you see, read text, or obstacle guidance."
+        self._voice_feedback(feedback)
 
     def _voice_feedback(self, msg):
         self.listening = False
@@ -1488,7 +1836,10 @@ class VisionAidApp(App):
 
     def on_stop(self):
         if hasattr(self, "main_screen") and self.main_screen is not None:
-            self.main_screen.stop_camera()
+            try:
+                self.main_screen.stop_camera()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

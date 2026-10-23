@@ -19,7 +19,7 @@ ICON_BACK = os.path.join(BASE_DIR, "assets", "icons", "icon_back.png")
 ICON_GLOBE = os.path.join(BASE_DIR, "assets", "icons", "icon_globe.png")
 ICON_USER = os.path.join(BASE_DIR, "assets", "icons", "icon_user.png")
 
-from language_manager import language_manager
+from language_manager import language_manager, SUPPORTED_LANGUAGES
 
 # Lilac & Pink Theme Colors
 C_LILAC = (0.75, 0.52, 0.98, 1)        # #C084FC Soft Radiant Lilac
@@ -103,51 +103,139 @@ class LilacCard(BoxLayout):
         self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, self.card_radius[0])
 
 
-class GradientButton(Button):
-    """Tactile button with smooth pink gradient texture."""
-    def __init__(self, radius=14, **kwargs):
+class GradientButton(ButtonBehavior, BoxLayout):
+    """An interactive action button with vibrant pink gradient and rounded corners."""
+    def __init__(self, text="Button", font_size=14, bold=True, color=None, **kwargs):
+        # Remove label-specific properties from kwargs before passing to BoxLayout
+        kwargs.pop("font_size", None)
+        kwargs.pop("bold", None)
+        kwargs.pop("color", None)
         super().__init__(**kwargs)
-        self.background_normal = ""
-        self.background_down = ""
-        self.background_color = (0, 0, 0, 0)
-        self.btn_radius = [dp(radius)]
+        self.orientation = "horizontal"
 
         with self.canvas.before:
-            self.canvas_tint = Color(1, 1, 1, 1)
-            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=self.btn_radius, source=TEX_BTN)
-            self.canvas_border = Color(1, 0.70, 0.85, 0.9)
-            self.border_line = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(radius)), width=1.3)
+            Color(1, 1, 1, 1)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)], source=TEX_BTN)
 
         self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        self.btn_lbl = Label(
+            text=text,
+            font_size=font_size,
+            bold=bold,
+            color=color or C_TEXT_WHITE,
+            halign="center",
+            valign="middle"
+        )
+        self.add_widget(self.btn_lbl)
+
+    @property
+    def text(self):
+        return self.btn_lbl.text
+
+    @text.setter
+    def text(self, val):
+        self.btn_lbl.text = str(val)
+
+    def set_text(self, val):
+        self.btn_lbl.text = str(val)
 
     def _update_canvas(self, *args):
         self.bg_rect.pos = self.pos
         self.bg_rect.size = self.size
-        self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, self.btn_radius[0])
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            self.canvas_tint.rgba = (0.85, 0.85, 0.85, 1)
+            self.opacity = 0.82
         return super().on_touch_down(touch)
 
     def on_touch_up(self, touch):
-        self.canvas_tint.rgba = (1, 1, 1, 1)
+        self.opacity = 1.0
         return super().on_touch_up(touch)
 
 
+class LanguageOptionChip(ButtonBehavior, BoxLayout):
+    """Interactive chip for selecting a language immediately on the settings screen."""
+
+    def __init__(self, lang_data, is_active=False, on_select=None, **kwargs):
+        super().__init__(**kwargs)
+        self.lang_data = lang_data
+        self.is_active = is_active
+        self.on_select = on_select
+        self.orientation = "horizontal"
+        self.size_hint = (0.48, None)
+        self.height = dp(44)
+        self.padding = [dp(10), dp(4), dp(10), dp(4)]
+        self.spacing = dp(8)
+
+        with self.canvas.before:
+            self.bg_color = Color(0.34, 0.17, 0.48, 0.95) if is_active else Color(0.18, 0.11, 0.26, 0.90)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
+            self.border_color = Color(*(C_PINK if is_active else (0.38, 0.24, 0.52, 0.7)))
+            self.border_line = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(12)), width=1.6 if is_active else 1.0)
+
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        self.badge_lbl = Label(
+            text=f"[b]{lang_data['badge']}[/b]",
+            markup=True,
+            font_size=13,
+            color=C_PINK if is_active else C_TEXT_MUTED,
+            size_hint=(None, 1),
+            width=dp(26)
+        )
+        self.name_lbl = Label(
+            text=f"[b]{lang_data['native']}[/b]" if is_active else lang_data["native"],
+            markup=True,
+            font_size=13,
+            color=C_TEXT_WHITE if is_active else C_TEXT_MUTED,
+            halign="left",
+            valign="middle"
+        )
+        self.name_lbl.bind(size=self.name_lbl.setter("text_size"))
+
+        self.add_widget(self.badge_lbl)
+        self.add_widget(self.name_lbl)
+
+    def _update_canvas(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+        self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(12))
+
+    def set_active(self, active):
+        self.is_active = active
+        self.bg_color.rgba = (0.34, 0.17, 0.48, 0.95) if active else (0.18, 0.11, 0.26, 0.90)
+        self.border_color.rgba = C_PINK if active else (0.38, 0.24, 0.52, 0.7)
+        self.border_line.width = 1.6 if active else 1.0
+        self.badge_lbl.color = C_PINK if active else C_TEXT_MUTED
+        self.name_lbl.color = C_TEXT_WHITE if active else C_TEXT_MUTED
+        self.name_lbl.text = f"[b]{self.lang_data['native']}[/b]" if active else self.lang_data["native"]
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            if self.on_select:
+                self.on_select(self.lang_data["code"])
+            return True
+        return super().on_touch_down(touch)
+
+
 class SettingsScreen(Screen):
-    """Luxurious Lilac and Pinkish Settings screen."""
+    """Preferences dashboard with instant multi-language selection, audio controls, and safety settings."""
 
     def __init__(self, settings, tts, **kwargs):
         super().__init__(**kwargs)
         self.settings = settings
         self.tts = tts
+        self.lang_chips = {}
         self._build_ui()
 
     def _build_ui(self):
-        root_layout = BoxLayout(orientation="vertical", padding=[dp(16), dp(14), dp(16), dp(16)], spacing=dp(12))
+        root_layout = BoxLayout(
+            orientation="vertical",
+            padding=[dp(16), dp(16), dp(16), dp(16)],
+            spacing=dp(12)
+        )
 
-        # Canvas with deep midnight orchid gradient texture
         with root_layout.canvas.before:
             Color(1, 1, 1, 1)
             self.bg_rect = RoundedRectangle(pos=root_layout.pos, size=root_layout.size, source=TEX_BG)
@@ -160,26 +248,24 @@ class SettingsScreen(Screen):
         # -------------------------------------------------------------
         top_bar = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(50), spacing=dp(10))
 
-        # Back Button with left chevron icon & BACK text (100% visible)
         back_btn = BackButton(icon_path=ICON_BACK)
         back_btn.bind(on_press=self.go_back)
 
-        title_lbl = Label(
-            text="SETTINGS",
-            font_size=20,
+        self.title_lbl = Label(
+            text=language_manager.get_string("settings_title", self.settings.language),
+            font_size=18,
             bold=True,
             color=C_LILAC,
             halign="center",
             valign="middle",
             size_hint=(1, 1)
         )
-        title_lbl.bind(size=title_lbl.setter("text_size"))
+        self.title_lbl.bind(size=self.title_lbl.setter("text_size"))
 
-        # Right balancing spacer so title stays centered
         spacer = BoxLayout(size_hint=(None, None), size=(dp(98), dp(38)))
 
         top_bar.add_widget(back_btn)
-        top_bar.add_widget(title_lbl)
+        top_bar.add_widget(self.title_lbl)
         top_bar.add_widget(spacer)
         root_layout.add_widget(top_bar)
 
@@ -190,12 +276,54 @@ class SettingsScreen(Screen):
         content = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(14), padding=[0, dp(4), 0, dp(16)])
         content.bind(minimum_height=content.setter("height"))
 
-        # --- CARD 1: SPEECH & AUDIO ---
+        # --- CARD 1: VISUAL LANGUAGE SELECTOR (PROMINENT & EASY TO ACCESS) ---
+        lang_card = LilacCard(orientation="vertical", size_hint_y=None, height=dp(195),
+                              padding=dp(14), spacing=dp(8))
+
+        lang_header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(24), spacing=dp(6))
+        globe_icon = Image(source=ICON_GLOBE, size_hint=(None, 1), width=dp(20), fit_mode="contain", color=C_PINK)
+        self.sec_lang_title = Label(
+            text=language_manager.get_string("lang_selector_title", self.settings.language),
+            font_size=12,
+            bold=True,
+            color=C_PINK,
+            size_hint=(1, 1),
+            halign="left",
+            valign="middle"
+        )
+        self.sec_lang_title.bind(size=self.sec_lang_title.setter("text_size"))
+        lang_header.add_widget(globe_icon)
+        lang_header.add_widget(self.sec_lang_title)
+        lang_card.add_widget(lang_header)
+
+        # Grid of supported languages (2 per row)
+        current_lang = self.settings.language or "en"
+        langs = SUPPORTED_LANGUAGES
+
+        for i in range(0, len(langs), 2):
+            row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(44), spacing=dp(10))
+            for j in range(2):
+                if i + j < len(langs):
+                    l_data = langs[i + j]
+                    chip = LanguageOptionChip(
+                        lang_data=l_data,
+                        is_active=(l_data["code"] == current_lang),
+                        on_select=self.on_language_select
+                    )
+                    self.lang_chips[l_data["code"]] = chip
+                    row.add_widget(chip)
+                else:
+                    row.add_widget(BoxLayout(size_hint=(0.48, 1)))
+            lang_card.add_widget(row)
+
+        content.add_widget(lang_card)
+
+        # --- CARD 2: SPEECH & AUDIO ---
         audio_card = LilacCard(orientation="vertical", size_hint_y=None, height=dp(230),
                                padding=dp(16), spacing=dp(10))
 
-        sec_audio_title = Label(
-            text="SPEECH & AUDIO PREFERENCES",
+        self.sec_audio_title = Label(
+            text=language_manager.get_string("audio_title", self.settings.language),
             font_size=12,
             bold=True,
             color=C_PINK,
@@ -203,17 +331,18 @@ class SettingsScreen(Screen):
             height=dp(20),
             halign="left"
         )
-        sec_audio_title.bind(size=sec_audio_title.setter("text_size"))
-        audio_card.add_widget(sec_audio_title)
+        self.sec_audio_title.bind(size=self.sec_audio_title.setter("text_size"))
+        audio_card.add_widget(self.sec_audio_title)
 
         # Volume row
         vol_header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(24))
-        vol_lbl = Label(text="Voice Volume", font_size=15, color=C_TEXT_WHITE, halign="left")
-        vol_lbl.bind(size=vol_lbl.setter("text_size"))
+        self.vol_lbl = Label(text=language_manager.get_string("vol_title", self.settings.language),
+                             font_size=15, color=C_TEXT_WHITE, halign="left")
+        self.vol_lbl.bind(size=self.vol_lbl.setter("text_size"))
         self.vol_val_lbl = Label(text=f"{self.settings.volume}%", font_size=14, bold=True,
                                  color=C_PINK, size_hint=(None, 1), width=dp(60), halign="right")
         self.vol_val_lbl.bind(size=self.vol_val_lbl.setter("text_size"))
-        vol_header.add_widget(vol_lbl)
+        vol_header.add_widget(self.vol_lbl)
         vol_header.add_widget(self.vol_val_lbl)
         audio_card.add_widget(vol_header)
 
@@ -223,12 +352,13 @@ class SettingsScreen(Screen):
 
         # Speed row
         spd_header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(24))
-        spd_lbl = Label(text="Speech Speed", font_size=15, color=C_TEXT_WHITE, halign="left")
-        spd_lbl.bind(size=spd_lbl.setter("text_size"))
+        self.spd_lbl = Label(text=language_manager.get_string("spd_title", self.settings.language),
+                             font_size=15, color=C_TEXT_WHITE, halign="left")
+        self.spd_lbl.bind(size=self.spd_lbl.setter("text_size"))
         self.spd_val_lbl = Label(text=self._format_speed(self.settings.rate), font_size=14, bold=True,
                                  color=C_LILAC, size_hint=(None, 1), width=dp(85), halign="right")
         self.spd_val_lbl.bind(size=self.spd_val_lbl.setter("text_size"))
-        spd_header.add_widget(spd_lbl)
+        spd_header.add_widget(self.spd_lbl)
         spd_header.add_widget(self.spd_val_lbl)
         audio_card.add_widget(spd_header)
 
@@ -236,26 +366,26 @@ class SettingsScreen(Screen):
         self.speed_slider.bind(value=self.on_speed_change)
         audio_card.add_widget(self.speed_slider)
 
-        # Test Voice Button with Pink Gradient
-        test_voice_btn = GradientButton(
-            text="Play Voice Sample",
+        # Test Voice Button
+        self.test_voice_btn = GradientButton(
+            text=language_manager.get_string("play_sample", self.settings.language),
             font_size=14,
             bold=True,
             color=(1, 1, 1, 1),
             size_hint=(1, None),
             height=dp(40)
         )
-        test_voice_btn.bind(on_press=self.play_voice_sample)
-        audio_card.add_widget(test_voice_btn)
+        self.test_voice_btn.bind(on_press=self.play_voice_sample)
+        audio_card.add_widget(self.test_voice_btn)
 
         content.add_widget(audio_card)
 
-        # --- CARD 2: OBSTACLE SENSITIVITY ---
+        # --- CARD 3: OBSTACLE SENSITIVITY ---
         obstacle_card = LilacCard(orientation="vertical", size_hint_y=None, height=dp(130),
                                   padding=dp(16), spacing=dp(10))
 
-        sec_obs_title = Label(
-            text="SAFETY & PROXIMITY ALERTS",
+        self.sec_obs_title = Label(
+            text=language_manager.get_string("obs_title", self.settings.language),
             font_size=12,
             bold=True,
             color=C_ROSE,
@@ -263,16 +393,17 @@ class SettingsScreen(Screen):
             height=dp(20),
             halign="left"
         )
-        sec_obs_title.bind(size=sec_obs_title.setter("text_size"))
-        obstacle_card.add_widget(sec_obs_title)
+        self.sec_obs_title.bind(size=self.sec_obs_title.setter("text_size"))
+        obstacle_card.add_widget(self.sec_obs_title)
 
         obs_header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(24))
-        obs_lbl = Label(text="Proximity Alert Threshold", font_size=15, color=C_TEXT_WHITE, halign="left")
-        obs_lbl.bind(size=obs_lbl.setter("text_size"))
+        self.obs_lbl = Label(text=language_manager.get_string("obs_thresh", self.settings.language),
+                             font_size=15, color=C_TEXT_WHITE, halign="left")
+        self.obs_lbl.bind(size=self.obs_lbl.setter("text_size"))
         self.obs_val_lbl = Label(text=f"{int(self.settings.obstacle_threshold * 100)}%", font_size=14, bold=True,
                                  color=C_ROSE, size_hint=(None, 1), width=dp(60), halign="right")
         self.obs_val_lbl.bind(size=self.obs_val_lbl.setter("text_size"))
-        obs_header.add_widget(obs_lbl)
+        obs_header.add_widget(self.obs_lbl)
         obs_header.add_widget(self.obs_val_lbl)
         obstacle_card.add_widget(obs_header)
 
@@ -283,12 +414,12 @@ class SettingsScreen(Screen):
 
         content.add_widget(obstacle_card)
 
-        # --- CARD 3: HANDS-FREE VOICE ---
+        # --- CARD 4: HANDS-FREE VOICE ---
         voice_card = LilacCard(orientation="vertical", size_hint_y=None, height=dp(115),
                                padding=dp(16), spacing=dp(10))
 
-        sec_voice_title = Label(
-            text="HANDS-FREE ASSISTANCE",
+        self.sec_voice_title = Label(
+            text=language_manager.get_string("voice_assist", self.settings.language),
             font_size=12,
             bold=True,
             color=C_LILAC,
@@ -296,18 +427,18 @@ class SettingsScreen(Screen):
             height=dp(20),
             halign="left"
         )
-        sec_voice_title.bind(size=sec_voice_title.setter("text_size"))
-        voice_card.add_widget(sec_voice_title)
+        self.sec_voice_title.bind(size=self.sec_voice_title.setter("text_size"))
+        voice_card.add_widget(self.sec_voice_title)
 
         voice_row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(44), spacing=dp(12))
-        voice_desc = Label(
-            text="Voice Recognition",
+        self.voice_desc = Label(
+            text=language_manager.get_string("voice_rec", self.settings.language),
             font_size=15,
             color=C_TEXT_WHITE,
             halign="left",
             valign="middle"
         )
-        voice_desc.bind(size=voice_desc.setter("text_size"))
+        self.voice_desc.bind(size=self.voice_desc.setter("text_size"))
 
         self.voice_toggle = ToggleButton(
             text="ENABLED" if self.settings.voice_enabled else "DISABLED",
@@ -323,22 +454,20 @@ class SettingsScreen(Screen):
         self._update_toggle_style(self.voice_toggle, self.settings.voice_enabled)
         self.voice_toggle.bind(state=self.on_voice_toggle)
 
-        voice_row.add_widget(voice_desc)
+        voice_row.add_widget(self.voice_desc)
         voice_row.add_widget(self.voice_toggle)
         voice_card.add_widget(voice_row)
 
         content.add_widget(voice_card)
 
-        # -------------------------------------------------------------
-        # 5. ACCOUNT & LANGUAGE PREFERENCES
-        # -------------------------------------------------------------
-        account_card = LilacCard(radius=16, orientation="vertical", size_hint=(1, None), height=dp(135),
+        # --- CARD 5: ACCOUNT & PROFILE ---
+        account_card = LilacCard(radius=16, orientation="vertical", size_hint=(1, None), height=dp(120),
                                  padding=[dp(16), dp(12), dp(16), dp(14)], spacing=dp(8))
 
         acc_header = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(26), spacing=dp(8))
         acc_icon = Image(source=ICON_USER, size_hint=(None, 1), width=dp(18), fit_mode="contain", color=C_PINK)
         self.acc_title = Label(
-            text="Account & Language",
+            text=language_manager.get_string("account_title", self.settings.language),
             font_size=15,
             bold=True,
             color=C_TEXT_WHITE,
@@ -353,7 +482,7 @@ class SettingsScreen(Screen):
 
         user_info = self.settings.current_user or {"name": "Guest Explorer", "email": "guest@visionaid.ai"}
         self.user_lbl = Label(
-            text=f"User: {user_info.get('name', 'Guest')} • Lang: {language_manager.get_language_info(self.settings.language)['native']}",
+            text=f"User: {user_info.get('name', 'Guest')} • {language_manager.get_language_info(self.settings.language)['native']}",
             font_size=12,
             color=C_TEXT_MUTED,
             size_hint=(1, None),
@@ -363,33 +492,19 @@ class SettingsScreen(Screen):
         self.user_lbl.bind(size=self.user_lbl.setter("text_size"))
         account_card.add_widget(self.user_lbl)
 
-        # Buttons row: Change Language & Log Out
-        btn_row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(40), spacing=dp(10))
-        lang_btn = Button(
-            text="Change Language",
-            font_size=12,
-            bold=True,
-            color=C_TEXT_WHITE,
-            background_normal="",
-            background_color=(0.28, 0.16, 0.42, 0.95),
-            size_hint=(0.58, 1)
-        )
-        lang_btn.bind(on_press=self._goto_language)
-
+        # Logout Button
         logout_btn = Button(
-            text="Log Out",
+            text=language_manager.get_string("logout", self.settings.language),
             font_size=12,
             bold=True,
             color=(0.98, 0.45, 0.55, 1),
             background_normal="",
             background_color=(0.32, 0.12, 0.22, 0.95),
-            size_hint=(0.42, 1)
+            size_hint=(1, None),
+            height=dp(36)
         )
         logout_btn.bind(on_press=self._handle_logout)
-
-        btn_row.add_widget(lang_btn)
-        btn_row.add_widget(logout_btn)
-        account_card.add_widget(btn_row)
+        account_card.add_widget(logout_btn)
 
         content.add_widget(account_card)
 
@@ -409,6 +524,42 @@ class SettingsScreen(Screen):
         root_layout.add_widget(scroll)
 
         self.add_widget(root_layout)
+
+    def on_language_select(self, lang_code):
+        """Immediately apply language change across settings, TTS engine, and UI."""
+        self.settings.set_language(lang_code)
+        language_manager.set_language(lang_code)
+        self.tts.set_language(lang_code)
+
+        # Update visual chip states
+        for code, chip in self.lang_chips.items():
+            chip.set_active(code == lang_code)
+
+        # Localized spoken confirmation
+        info = language_manager.get_language_info(lang_code)
+        self.tts.speak(info["confirmation"], interrupt=True)
+
+        # Refresh all labels on this screen
+        self.refresh_ui_texts()
+
+    def refresh_ui_texts(self):
+        """Update all text labels on the settings screen to match the current language."""
+        lang = self.settings.language
+        self.title_lbl.text = language_manager.get_string("settings_title", lang)
+        self.sec_lang_title.text = language_manager.get_string("lang_selector_title", lang)
+        self.sec_audio_title.text = language_manager.get_string("audio_title", lang)
+        self.vol_lbl.text = language_manager.get_string("vol_title", lang)
+        self.spd_lbl.text = language_manager.get_string("spd_title", lang)
+        self.test_voice_btn.btn_lbl.text = language_manager.get_string("play_sample", lang)
+        self.sec_obs_title.text = language_manager.get_string("obs_title", lang)
+        self.obs_lbl.text = language_manager.get_string("obs_thresh", lang)
+        self.sec_voice_title.text = language_manager.get_string("voice_assist", lang)
+        self.voice_desc.text = language_manager.get_string("voice_rec", lang)
+        self.acc_title.text = language_manager.get_string("account_title", lang)
+
+        user_info = self.settings.current_user or {"name": "Guest Explorer", "email": "guest@visionaid.ai"}
+        lang_info = language_manager.get_language_info(lang)
+        self.user_lbl.text = f"User: {user_info.get('name', 'Guest')} • {lang_info['native']}"
 
     def _format_speed(self, rate):
         rate = int(rate)
@@ -463,17 +614,28 @@ class SettingsScreen(Screen):
         self._update_toggle_style(instance, is_on)
 
     def play_voice_sample(self, instance):
-        self.tts.speak("This is a preview of your VisionAid speech settings.", interrupt=True)
+        msg = language_manager.get_string("preview_speech", self.settings.language)
+        self.tts.speak(msg, interrupt=True)
 
     def go_back(self, instance):
         if self.manager:
+            # If main screen has update_language, call it
+            if self.manager.has_screen("main"):
+                main_scr = self.manager.get_screen("main")
+                if hasattr(main_scr, "update_language"):
+                    main_scr.update_language()
             self.manager.transition.direction = "right"
             self.manager.current = "main"
 
     def on_enter(self):
-        user_info = self.settings.current_user or {"name": "Guest Explorer", "email": "guest@visionaid.ai"}
-        lang_info = language_manager.get_language_info(self.settings.language)
-        self.user_lbl.text = f"User: {user_info.get('name', 'Guest')} • Lang: {lang_info['native']}"
+        current_lang = self.settings.language or "en"
+        language_manager.set_language(current_lang)
+        self.tts.set_language(current_lang)
+
+        for code, chip in self.lang_chips.items():
+            chip.set_active(code == current_lang)
+
+        self.refresh_ui_texts()
 
     def _goto_language(self, *args):
         if self.manager:
@@ -482,7 +644,8 @@ class SettingsScreen(Screen):
 
     def _handle_logout(self, *args):
         self.settings.logout()
-        self.tts.speak("Logged out successfully.", interrupt=True)
+        logout_msg = language_manager.get_string("logged_out", self.settings.language)
+        self.tts.speak(logout_msg, interrupt=True)
         if self.manager:
             self.manager.transition.direction = "right"
             self.manager.current = "login"

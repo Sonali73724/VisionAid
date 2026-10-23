@@ -13,10 +13,10 @@ package.domain = org.visionaid
 source.dir = .
 
 # (list) Source files to include (let empty to include all the files)
-source.include_exts = py,png,jpg,kv,atlas,wav,json
+source.include_exts = py,png,jpg,kv,atlas,wav,json,ttf
 
 # (list) List of directory to exclude
-source.exclude_dirs = tests, bin, .venv, .git, .github, scratch, backend, __pycache__
+source.exclude_dirs = tests, bin, .venv, .git, .github, scratch, backend, __pycache__, models
 
 # (list) List of exclusions using pattern matching
 source.exclude_patterns = *.pt, *.zip, vision_app*.py, *test*.py, *.txt, server.py
@@ -26,13 +26,13 @@ version = 1.0.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy,requests,pillow,certifi
+requirements = python3,kivy,requests,pillow,certifi,plyer
 
 # (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
 orientation = portrait
 
 # (list) Permissions
-android.permissions = CAMERA, RECORD_AUDIO, INTERNET, ACCESS_NETWORK_STATE
+android.permissions = CAMERA, RECORD_AUDIO, INTERNET, ACCESS_NETWORK_STATE, VIBRATE, WAKE_LOCK
 
 # (int) Target Android API, should be as high as possible.
 android.api = 33

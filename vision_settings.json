@@ -1,14 +1,15 @@
 {
   "volume": 100,
   "rate": 0,
-  "obstacle_threshold": 0.25,
+  "obstacle_threshold": 0.3,
   "voice_enabled": true,
-  "language": "hi",
+  "language": "en",
   "language_selected": true,
   "current_user": {
-    "id": "usr_01c29808",
-    "name": "Sonali Singh",
-    "email": "singhsonali3745@gmail.com",
+    "id": "usr_933c4a21",
+    "name": "sonali",
+    "email": "sonalis123@gmail.com",
     "is_guest": false
-  }
+  },
+  "server_url": "http://127.0.0.1:8000"
 }

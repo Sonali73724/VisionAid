@@ -22,6 +22,22 @@
       "password_hash": "c563dd9d6e12d90a8a404c0a9ba346d36e2ff1324dfffd0a3e511fcb10e13e94",
       "salt": "e380ffcbb61a4843",
       "is_guest": false
+    },
+    {
+      "id": "usr_933c4a21",
+      "name": "sonali",
+      "email": "sonalis123@gmail.com",
+      "password_hash": "da0f9cbbb794e188d96867677f20ba21132b96db180202fc44942a2ff2ab5423",
+      "salt": "09f3d87cbe5045fa",
+      "is_guest": false
+    },
+    {
+      "id": "usr_8e790930",
+      "name": "Sonali Singh",
+      "email": "singh123@gmail.com",
+      "password_hash": "ba7a3b5b73d5d630ba8bef7df10b95b93e26785c1f07d6841ede4f8e9d862546",
+      "salt": "59c4403b75ad48ee",
+      "is_guest": false
     }
   ]
 }
