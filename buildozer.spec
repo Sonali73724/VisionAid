@@ -24,8 +24,10 @@ source.exclude_patterns = *.pt, *.zip, vision_app*.py, *test*.py, *.txt, server.
 # (str) Application versioning
 version = 1.0.0
 
-# (list) Application requirements
-requirements = python3,kivy,charset-normalizer==2.1.1
+requirements = python3,kivy
+
+# (str) The directory in which python-for-android should look for custom build recipes
+p4a.local_recipes = %(source.dir)s/p4a_recipes
 
 # (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
 orientation = portrait

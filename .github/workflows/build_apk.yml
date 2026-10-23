@@ -45,17 +45,15 @@ jobs:
 
       - name: Build Android APK with Buildozer
         run: |
-          yes | buildozer -v android debug
+          set -o pipefail
+          yes | buildozer -v android debug 2>&1 | tee buildozer_output.log
 
       - name: Upload Buildozer Logs on Failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: buildozer-debug-logs
-          path: |
-            .buildozer/**/*.log
-            ~/.buildozer/**/*.log
-          if-no-files-found: warn
+          path: buildozer_output.log
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
