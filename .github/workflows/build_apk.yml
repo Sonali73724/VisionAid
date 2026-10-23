@@ -39,7 +39,7 @@ jobs:
 
       - name: Build Android APK with Buildozer
         run: |
-          buildozer -v android debug
+          yes | buildozer -v android debug
 
       - name: Upload Buildozer Logs on Failure
         if: failure()
