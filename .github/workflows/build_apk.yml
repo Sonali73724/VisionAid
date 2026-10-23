@@ -36,6 +36,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "buildozer>=1.5.0" "cython<3.0" virtualenv
+          mkdir -p ~/.config/pip ~/.pip
+          cat << 'EOF' > ~/.pip/pip.conf
+          [global]
+          no-binary = charset-normalizer
+          EOF
+          cp ~/.pip/pip.conf ~/.config/pip/pip.conf
 
       - name: Build Android APK with Buildozer
         run: |
@@ -46,7 +52,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: buildozer-debug-logs
-          path: buildozer_output.log
+          path: |
+            .buildozer/**/*.log
+            ~/.buildozer/**/*.log
+          if-no-files-found: warn
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

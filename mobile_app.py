@@ -22,7 +22,6 @@ try:
 except ImportError:
     cv2 = None
 
-from PIL import Image as PILImage
 
 # Kivy configuration for Mobile Display
 from kivy.config import Config
