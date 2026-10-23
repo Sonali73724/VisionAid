@@ -3,7 +3,7 @@ import sys
 import packaging.version
 
 import sh
-from pythonforandroid.recipe import PyProjectRecipe, Recipe
+from pythonforandroid.recipe import PyProjectRecipe
 from pythonforandroid.toolchain import current_directory, shprint
 
 
@@ -33,9 +33,9 @@ class KivyRecipe(PyProjectRecipe):
     url = 'https://github.com/kivy/kivy/archive/{version}.zip'
     name = 'kivy'
 
-    depends = [('sdl2', 'sdl3'), 'pyjnius', 'android', 'libthorvg']
+    depends = [('sdl2', 'sdl3'), 'pyjnius', 'setuptools', 'android']
     python_depends = []
-    hostpython_prerequisites = ['cython>=0.29.1,<=3.0.12', 'setuptools']
+    hostpython_prerequisites = ["cython>=0.29.1,<=3.0.12"]
 
     # sdl-gl-swapwindow-nogil.patch is needed to avoid a deadlock.
     # See: https://github.com/kivy/kivy/pull/8025
@@ -43,7 +43,7 @@ class KivyRecipe(PyProjectRecipe):
     patches = [
         ("sdl-gl-swapwindow-nogil.patch", is_kivy_affected_by_deadlock_issue),
         ("use_cython.patch", is_kivy_less_than_3),
-        ("no-ast-str.patch", is_kivy_less_than_3),
+        "no-ast-str.patch"
     ]
 
     @property
@@ -69,13 +69,6 @@ class KivyRecipe(PyProjectRecipe):
         env['NDKPLATFORM'] = "NOTNONE"
         if not is_kivy_less_than_3(self, arch):
             env['KIVY_CROSS_PLATFORM'] = 'android'
-
-        # thorvg headers
-        env['KIVY_THORVG_LIB_DIR'] = self.ctx.get_libs_dir(arch.arch)
-        env['KIVY_THORVG_INCLUDE_DIR'] = join(
-            Recipe.get_recipe('libthorvg', self.ctx).get_include_dir(arch),
-            'thorvg-1'
-        )
 
         if 'sdl2' in self.ctx.recipe_build_order:
             env['USE_SDL2'] = '1'
