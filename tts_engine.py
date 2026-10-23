@@ -34,11 +34,18 @@ class TTSEngine:
 
         if self.is_android:
             try:
-                from plyer import tts
-                self.speaker = tts
-                print("✅ Android Plyer TTS initialized successfully")
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
+                self.speaker = TextToSpeech(PythonActivity.mActivity, None)
+                print("✅ Android native TextToSpeech initialized successfully via pyjnius")
             except Exception as e:
-                print("Android TTS error:", e)
+                print("Android pyjnius TTS init error, trying plyer:", e)
+                try:
+                    from plyer import tts
+                    self.speaker = tts
+                except Exception:
+                    self.speaker = None
         elif self.system == "Windows":
             try:
                 import win32com.client
@@ -134,11 +141,23 @@ class TTSEngine:
             pass
 
         if self.is_android:
-            try:
-                from plyer import tts
-                threading.Thread(target=tts.speak, args=(text,), daemon=True).start()
-            except Exception as e:
-                print("Android TTS error:", e)
+            def _android_speak():
+                try:
+                    from jnius import autoclass
+                    TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
+                    if self.speaker and hasattr(self.speaker, "speak"):
+                        mode = TextToSpeech.QUEUE_FLUSH if interrupt else TextToSpeech.QUEUE_ADD
+                        self.speaker.speak(text, mode, None, None)
+                        return
+                except Exception:
+                    pass
+                try:
+                    from plyer import tts
+                    tts.speak(text)
+                except Exception as e:
+                    print("Android TTS fallback error:", e)
+
+            threading.Thread(target=_android_speak, daemon=True).start()
         elif self.system == "Windows" and self.speaker:
             try:
                 import pythoncom
@@ -168,7 +187,12 @@ class TTSEngine:
 
     def stop(self):
         """Stop any currently playing speech immediately."""
-        if self.system == "Windows" and self.speaker:
+        if self.is_android and self.speaker:
+            try:
+                self.speaker.stop()
+            except Exception:
+                pass
+        elif self.system == "Windows" and self.speaker:
             try:
                 import pythoncom
                 pythoncom.CoInitialize()
