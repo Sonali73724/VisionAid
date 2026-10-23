@@ -40,16 +40,14 @@ jobs:
       - name: Build Android APK with Buildozer
         run: |
           rm -f requirements*.txt
-          buildozer -v android debug
+          yes | buildozer -v android debug 2>&1 | tee buildozer_output.log
 
       - name: Upload Buildozer Logs on Failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: buildozer-debug-logs
-          path: |
-            .buildozer/logs/
-            ~/.buildozer/logs/
+          path: buildozer_output.log
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
