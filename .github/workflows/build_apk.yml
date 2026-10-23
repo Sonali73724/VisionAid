@@ -39,6 +39,7 @@ jobs:
 
       - name: Build Android APK with Buildozer
         run: |
+          rm -f requirements*.txt
           buildozer -v android debug
 
       - name: Upload Buildozer Logs on Failure
