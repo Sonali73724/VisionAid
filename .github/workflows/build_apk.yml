@@ -45,8 +45,8 @@ jobs:
 
       - name: Build Android APK with Buildozer
         run: |
-          set -o pipefail
-          yes | buildozer -v android debug 2>&1 | tee buildozer_output.log
+          buildozer -v android debug 2>&1 | tee buildozer_output.log
+          test ${PIPESTATUS[0]} -eq 0
 
       - name: Upload Buildozer Logs on Failure
         if: failure()
@@ -57,8 +57,9 @@ jobs:
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
-        if: success()
+        if: always()
         with:
           name: VisionAid-Mobile-APK
           path: bin/*.apk
+          if-no-files-found: ignore
           retention-days: 14
