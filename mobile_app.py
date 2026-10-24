@@ -22,6 +22,11 @@ try:
 except ImportError:
     cv2 = None
 
+try:
+    from PIL import Image as PILImage
+except ImportError:
+    PILImage = None
+
 
 # Kivy configuration for Mobile Display
 from kivy.config import Config
@@ -715,7 +720,7 @@ class MainScreen(Screen):
                         ret, jpeg = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 65])
                         if ret:
                             jpeg_bytes = jpeg.tobytes()
-                    else:
+                    elif PILImage is not None:
                         pil_img = PILImage.fromarray(frame_to_send)
                         buf = io.BytesIO()
                         pil_img.resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
@@ -726,10 +731,11 @@ class MainScreen(Screen):
                     tex = frame_to_send
                     target_w = 320
                     target_h = max(1, int(320 * tex.height / max(1, tex.width)))
-                    pil_img = PILImage.frombytes(mode='RGBA', size=tex.size, data=tex.pixels)
-                    buf = io.BytesIO()
-                    pil_img.convert('RGB').resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
-                    jpeg_bytes = buf.getvalue()
+                    if PILImage is not None:
+                        pil_img = PILImage.frombytes(mode='RGBA', size=tex.size, data=tex.pixels)
+                        buf = io.BytesIO()
+                        pil_img.convert('RGB').resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
+                        jpeg_bytes = buf.getvalue()
 
                 if not jpeg_bytes:
                     time.sleep(0.02)
