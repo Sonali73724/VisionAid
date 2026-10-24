@@ -17,7 +17,10 @@ except ImportError:
     winsound = None
 
 SOUNDS_DIR = os.path.join(os.path.dirname(__file__), "assets", "sounds")
-os.makedirs(SOUNDS_DIR, exist_ok=True)
+try:
+    os.makedirs(SOUNDS_DIR, exist_ok=True)
+except Exception:
+    pass
 
 def _generate_wav(filepath, duration_sec, freq_left=0, freq_right=0, sample_rate=44100):
     """Generate a clean 16-bit stereo WAV file with smooth attack/decay envelope."""
@@ -67,17 +70,23 @@ def _generate_two_tone_wav(filepath, duration_sec=0.20, f1=987, f2=1318, sample_
 
 def ensure_all_sounds():
     """Ensure all required sound assets exist."""
-    files = {
-        "radar_left.wav": lambda p: _generate_wav(p, 0.08, freq_left=880, freq_right=0),
-        "radar_right.wav": lambda p: _generate_wav(p, 0.08, freq_left=0, freq_right=880),
-        "radar_center.wav": lambda p: _generate_wav(p, 0.10, freq_left=1200, freq_right=1200),
-        "beacon_ping.wav": lambda p: _generate_wav(p, 0.06, freq_left=1050, freq_right=1050),
-        "beacon_lock.wav": lambda p: _generate_two_tone_wav(p, 0.18, 987, 1318),
-    }
-    for filename, generator in files.items():
-        target = os.path.join(SOUNDS_DIR, filename)
-        if not os.path.exists(target) or os.path.getsize(target) == 0:
-            generator(target)
+    try:
+        files = {
+            "radar_left.wav": lambda p: _generate_wav(p, 0.08, freq_left=880, freq_right=0),
+            "radar_right.wav": lambda p: _generate_wav(p, 0.08, freq_left=0, freq_right=880),
+            "radar_center.wav": lambda p: _generate_wav(p, 0.10, freq_left=1200, freq_right=1200),
+            "beacon_ping.wav": lambda p: _generate_wav(p, 0.06, freq_left=1050, freq_right=1050),
+            "beacon_lock.wav": lambda p: _generate_two_tone_wav(p, 0.18, 987, 1318),
+        }
+        for filename, generator in files.items():
+            target = os.path.join(SOUNDS_DIR, filename)
+            if not os.path.exists(target) or os.path.getsize(target) == 0:
+                try:
+                    generator(target)
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 class SoundManager:

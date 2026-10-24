@@ -28,11 +28,13 @@ except ImportError:
     PILImage = None
 
 
-# Kivy configuration for Mobile Display
-from kivy.config import Config
-Config.set('graphics', 'width', '420')
-Config.set('graphics', 'height', '780')
-Config.set('graphics', 'resizable', '1')
+# Kivy configuration for Mobile Display (Desktop preview only)
+from kivy.utils import platform as kivy_platform
+if kivy_platform not in ('android', 'ios'):
+    from kivy.config import Config
+    Config.set('graphics', 'width', '420')
+    Config.set('graphics', 'height', '780')
+    Config.set('graphics', 'resizable', '1')
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -100,7 +102,8 @@ C_TEXT_WHITE = (0.99, 0.96, 1.0, 1)      # #FDF4FF Warm Lilac-White
 C_TEXT_MUTED = (0.76, 0.70, 0.86, 1)      # #C4B5FD Soft Lavender
 C_BORDER_DEFAULT = (0.40, 0.24, 0.56, 0.8)
 
-Window.size = (420, 780)
+if kivy_platform not in ('android', 'ios'):
+    Window.size = (420, 780)
 Window.clearcolor = (0.07, 0.04, 0.11, 1)
 
 settings = VisionSettings()
@@ -818,22 +821,6 @@ class VisionAidMobileApp(App):
     def build(self):
         self.title = "VisionAid Mobile"
 
-        # Request Android runtime permissions on startup (Android 6.0+)
-        from kivy.utils import platform as kivy_platform
-        if kivy_platform == 'android':
-            try:
-                from android.permissions import request_permissions, Permission
-                request_permissions([
-                    Permission.CAMERA,
-                    Permission.RECORD_AUDIO,
-                    Permission.INTERNET,
-                    Permission.ACCESS_NETWORK_STATE,
-                    Permission.VIBRATE
-                ])
-                print("Android permissions requested")
-            except Exception as e:
-                print("Android permissions request error:", e)
-
         sm = ScreenManager(transition=SlideTransition(duration=0.25))
 
         self.language_screen = LanguageSelectionScreen(settings=settings, tts=tts, name="language_select")
@@ -856,6 +843,19 @@ class VisionAidMobileApp(App):
             sm.current = "login"
 
         return sm
+
+    def on_start(self):
+        Clock.schedule_once(self._request_permissions_delayed, 0.6)
+
+    def _request_permissions_delayed(self, dt):
+        from kivy.utils import platform as kivy_platform
+        if kivy_platform == 'android':
+            try:
+                from android.permissions import request_permissions, Permission
+                request_permissions([Permission.CAMERA, Permission.RECORD_AUDIO])
+                print("Android camera/mic permissions requested safely")
+            except Exception as e:
+                print("Android permissions request error:", e)
 
     def on_stop(self):
         if hasattr(self, "main_screen") and self.main_screen is not None:

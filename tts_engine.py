@@ -36,16 +36,15 @@ class TTSEngine:
             try:
                 from jnius import autoclass
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
-                self.speaker = TextToSpeech(PythonActivity.mActivity, None)
-                print("✅ Android native TextToSpeech initialized successfully via pyjnius")
-            except Exception as e:
-                print("Android pyjnius TTS init error, trying plyer:", e)
-                try:
-                    from plyer import tts
-                    self.speaker = tts
-                except Exception:
+                if getattr(PythonActivity, "mActivity", None) is not None:
+                    TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
+                    self.speaker = TextToSpeech(PythonActivity.mActivity, None)
+                    print("✅ Android native TextToSpeech initialized successfully via pyjnius")
+                else:
                     self.speaker = None
+            except Exception as e:
+                print("Android pyjnius TTS init error:", e)
+                self.speaker = None
         elif self.system == "Windows":
             try:
                 import win32com.client
@@ -145,17 +144,15 @@ class TTSEngine:
                 try:
                     from jnius import autoclass
                     TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
+                    if not self.speaker:
+                        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                        if getattr(PythonActivity, "mActivity", None) is not None:
+                            self.speaker = TextToSpeech(PythonActivity.mActivity, None)
                     if self.speaker and hasattr(self.speaker, "speak"):
                         mode = TextToSpeech.QUEUE_FLUSH if interrupt else TextToSpeech.QUEUE_ADD
                         self.speaker.speak(text, mode, None, None)
-                        return
-                except Exception:
-                    pass
-                try:
-                    from plyer import tts
-                    tts.speak(text)
                 except Exception as e:
-                    print("Android TTS fallback error:", e)
+                    print("Android TTS speak error:", e)
 
             threading.Thread(target=_android_speak, daemon=True).start()
         elif self.system == "Windows" and self.speaker:
