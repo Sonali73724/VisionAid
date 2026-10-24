@@ -51,7 +51,7 @@ android.skip_update = False
 android.accept_sdk_license = True
 
 # (str) The Android arch to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a
 
 # (str) Presplash of the application
 # android.presplash_color = #1A0F28
