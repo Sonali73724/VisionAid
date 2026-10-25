@@ -1,7 +1,21 @@
 import json
 import os
 
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "vision_settings.json")
+def _get_storage_path():
+    try:
+        from kivy.app import App
+        app = App.get_running_app()
+        if app and getattr(app, "user_data_dir", None):
+            return os.path.join(app.user_data_dir, "vision_settings.json")
+    except Exception:
+        pass
+    if "ANDROID_ARGUMENT" in os.environ or "ANDROID_ROOT" in os.environ:
+        home = os.path.expanduser("~")
+        if os.path.exists(home):
+            return os.path.join(home, "vision_settings.json")
+    return os.path.join(os.path.dirname(__file__), "vision_settings.json")
+
+BUNDLE_SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "vision_settings.json")
 
 class VisionSettings:
     """Manages user preferences with persistent JSON storage."""
@@ -31,9 +45,16 @@ class VisionSettings:
 
     def load(self):
         """Load settings from local JSON if available."""
-        if os.path.exists(SETTINGS_FILE):
+        target = _get_storage_path()
+        file_to_load = None
+        if os.path.exists(target):
+            file_to_load = target
+        elif os.path.exists(BUNDLE_SETTINGS_FILE):
+            file_to_load = BUNDLE_SETTINGS_FILE
+
+        if file_to_load:
             try:
-                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                with open(file_to_load, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.volume = int(data.get("volume", self.volume))
                     self.rate = int(data.get("rate", self.rate))
@@ -47,8 +68,12 @@ class VisionSettings:
                 print("Failed to load settings file, using defaults:", e)
 
     def save(self):
-        """Persist settings to JSON file."""
+        """Persist settings to JSON file in writable app storage."""
+        target = _get_storage_path()
         try:
+            target_dir = os.path.dirname(target)
+            if target_dir:
+                os.makedirs(target_dir, exist_ok=True)
             data = {
                 "volume": self.volume,
                 "rate": self.rate,
@@ -59,7 +84,7 @@ class VisionSettings:
                 "current_user": self.current_user,
                 "server_url": self.server_url,
             }
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            with open(target, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             print("Failed to save settings:", e)

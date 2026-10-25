@@ -10,6 +10,7 @@ import time
 import threading
 import io
 import json
+import struct
 import urllib.request
 
 try:
@@ -47,6 +48,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.image import Image
 from kivy.uix.label import Label
+from kivy.uix.widget import Widget
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.uix.scrollview import ScrollView
@@ -200,6 +202,153 @@ class ThreadedCamera:
             except Exception:
                 pass
             self.core_cam = None
+
+
+def encode_frame_to_bytes(frame_to_send, target_w=320):
+    """
+    Converts either a numpy ndarray (desktop OpenCV) or a Kivy Texture (Android CoreCamera)
+    into standard compressed image bytes (JPEG preferred, BMP fallback).
+    Requires ZERO external C/pip packages on Android.
+    """
+    if frame_to_send is None:
+        return None, None
+
+    # CASE 1: Numpy ndarray (Desktop OpenCV)
+    if hasattr(frame_to_send, "shape"):
+        h, w = frame_to_send.shape[:2]
+        target_h = max(1, int(h * (target_w / max(1, w))))
+        if cv2 is not None:
+            small = cv2.resize(frame_to_send, (target_w, target_h))
+            ret, jpeg = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 65])
+            if ret:
+                return jpeg.tobytes(), "image/jpeg"
+        if PILImage is not None:
+            try:
+                pil_img = PILImage.fromarray(frame_to_send)
+                buf = io.BytesIO()
+                pil_img.resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
+                return buf.getvalue(), "image/jpeg"
+            except Exception:
+                pass
+
+    # CASE 2: Kivy Texture (Mobile Android CoreCamera)
+    if hasattr(frame_to_send, "pixels"):
+        tex = frame_to_send
+        tw, th = tex.width, tex.height
+        target_h = max(1, int(target_w * th / max(1, tw)))
+
+        # Method 2A: Android Native Java Bitmap Compression (Hardware JPEG encoder on device)
+        if kivy_platform == 'android':
+            try:
+                from jnius import autoclass
+                Bitmap = autoclass('android.graphics.Bitmap')
+                BitmapConfig = autoclass('android.graphics.Bitmap$Config')
+                CompressFormat = autoclass('android.graphics.Bitmap$CompressFormat')
+                ByteArrayOutputStream = autoclass('java.io.ByteArrayOutputStream')
+                ByteBuffer = autoclass('java.nio.ByteBuffer')
+
+                raw_bytes = tex.pixels
+                if raw_bytes:
+                    bb = ByteBuffer.wrap(raw_bytes)
+                    bmp = Bitmap.createBitmap(tw, th, BitmapConfig.ARGB_8888)
+                    bmp.copyPixelsFromBuffer(bb)
+                    scaled = Bitmap.createScaledBitmap(bmp, target_w, target_h, True)
+                    stream = ByteArrayOutputStream()
+                    scaled.compress(CompressFormat.JPEG, 65, stream)
+                    jpeg_bytes = bytes(stream.toByteArray())
+                    stream.close()
+                    bmp.recycle()
+                    scaled.recycle()
+                    return jpeg_bytes, "image/jpeg"
+            except Exception as e:
+                print("Android native JPEG encode error:", e)
+
+        # Method 2B: Pillow (if available)
+        if PILImage is not None:
+            try:
+                pil_img = PILImage.frombytes('RGBA', tex.size, tex.pixels)
+                buf = io.BytesIO()
+                pil_img.convert('RGB').resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
+                return buf.getvalue(), "image/jpeg"
+            except Exception as e:
+                print("Pillow texture encode error:", e)
+
+        # Method 2C: Pure Python BMP Encoder (Works 100% everywhere without external packages)
+        try:
+            raw = tex.pixels
+            if raw and tw > 0 and th > 0:
+                x_ratio = tw / target_w
+                y_ratio = th / target_h
+                out_rows = bytearray()
+                for y in range(target_h):
+                    src_y = int(y * y_ratio)
+                    row_offset = src_y * tw * 4
+                    row = bytearray(target_w * 3)
+                    for x in range(target_w):
+                        src_x = int(x * x_ratio)
+                        src_idx = row_offset + src_x * 4
+                        row[x * 3] = raw[src_idx + 2]     # B
+                        row[x * 3 + 1] = raw[src_idx + 1] # G
+                        row[x * 3 + 2] = raw[src_idx]     # R
+                    pad = (4 - (target_w * 3) % 4) % 4
+                    if pad:
+                        row.extend(b'\x00' * pad)
+                    out_rows.extend(row)
+
+                file_size = 54 + len(out_rows)
+                header = struct.pack('<2sIHHI', b'BM', file_size, 0, 0, 54)
+                info = struct.pack('<IiiHHIIIIII', 40, target_w, -target_h, 1, 24, 0, len(out_rows), 2835, 2835, 0, 0)
+                return header + info + bytes(out_rows), "image/bmp"
+        except Exception as e:
+            print("Pure Python BMP encode error:", e)
+
+    return None, None
+
+
+class BoundingBoxOverlay(Widget):
+    """Draws visual detection boxes and object labels on top of the camera viewport for both Android and Desktop."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.detections = []
+        self.size_hint = (1, 1)
+        self.bind(pos=lambda *_: self.draw_boxes(), size=lambda *_: self.draw_boxes())
+
+    def update_boxes(self, detections):
+        self.detections = detections or []
+        self.draw_boxes()
+
+    def clear_boxes(self):
+        self.detections = []
+        self.canvas.clear()
+
+    def draw_boxes(self):
+        self.canvas.clear()
+        if not self.detections or self.width <= 0 or self.height <= 0:
+            return
+
+        with self.canvas:
+            for d in self.detections[:6]:
+                bbox = d.get("bbox", [0, 0, 0, 0])
+                x1, y1, x2, y2 = bbox
+                # Server coordinates relative to 320x240 image sent
+                norm_x1 = max(0.0, min(1.0, x1 / 320.0))
+                norm_x2 = max(0.0, min(1.0, x2 / 320.0))
+                norm_y1 = max(0.0, min(1.0, y1 / 240.0))
+                norm_y2 = max(0.0, min(1.0, y2 / 240.0))
+
+                w = max(dp(12), (norm_x2 - norm_x1) * self.width)
+                h = max(dp(12), (norm_y2 - norm_y1) * self.height)
+                # Kivy y=0 is at bottom, so flip y
+                x = self.x + norm_x1 * self.width
+                y = self.y + (1.0 - norm_y2) * self.height
+
+                pos = d.get("position", "center")
+                if pos == "center":
+                    Color(0.96, 0.45, 0.71, 0.95)  # Blossom Pink
+                else:
+                    Color(0.75, 0.52, 0.98, 0.95)  # Radiant Lilac
+
+                Line(rounded_rectangle=(x, y, w, h, dp(6)), width=1.8)
 
 
 class GradientActionCard(ButtonBehavior, BoxLayout):
@@ -477,8 +626,10 @@ class MainScreen(Screen):
         self.hud_banner.bind(pos=lambda *_: (setattr(self.hud_bg, "pos", self.hud_banner.pos), setattr(self.hud_border, "rounded_rectangle", (self.hud_banner.x, self.hud_banner.y, self.hud_banner.width, self.hud_banner.height, dp(12)))),
                              size=lambda *_: (setattr(self.hud_bg, "size", self.hud_banner.size), setattr(self.hud_border, "rounded_rectangle", (self.hud_banner.x, self.hud_banner.y, self.hud_banner.width, self.hud_banner.height, dp(12)))))
 
+        self.bbox_overlay = BoundingBoxOverlay()
         vp_wrapper.add_widget(self.placeholder)
         vp_wrapper.add_widget(self.camera_image)
+        vp_wrapper.add_widget(self.bbox_overlay)
         vp_wrapper.add_widget(self.hud_banner)
         root.add_widget(vp_wrapper)
 
@@ -579,6 +730,17 @@ class MainScreen(Screen):
             self.manager.current = "settings"
 
     def open_camera(self):
+        if kivy_platform == 'android':
+            try:
+                from android.permissions import check_permission, request_permissions, Permission
+                if not check_permission(Permission.CAMERA):
+                    print("Camera permission not granted, requesting...")
+                    request_permissions([Permission.CAMERA, Permission.RECORD_AUDIO])
+                    self.hud_banner.text = "Please allow Camera permission"
+                    return False
+            except Exception as e:
+                print("Permission check error:", e)
+
         if self.camera is not None and self.camera.is_opened():
             return True
         self.camera = ThreadedCamera(0, 640, 480)
@@ -604,6 +766,8 @@ class MainScreen(Screen):
         self.camera_image.texture = None
         self.camera_image.opacity = 0
         self.placeholder.opacity = 1
+        if hasattr(self, "bbox_overlay"):
+            self.bbox_overlay.clear_boxes()
         self.status_pill.text = language_manager.get_string("status_standby")
         self.status_pill.color = C_LILAC
         self.hud_banner.text = language_manager.get_string("banner_standby")
@@ -656,18 +820,6 @@ class MainScreen(Screen):
         if cv2 is not None and hasattr(frame, 'shape'):
             display_frame = cv2.flip(frame, 1)
             fh, fw = display_frame.shape[:2]
-
-            # Draw overlays from latest server response
-            for d in self.server_detections:
-                x1, y1, x2, y2 = d.get("bbox", [0, 0, 0, 0])
-                disp_x1 = max(0, min(fw, fw - x2))
-                disp_x2 = max(0, min(fw, fw - x1))
-                color = (244, 114, 182) if d.get("position") == "center" else (192, 132, 252)
-                cv2.rectangle(display_frame, (disp_x1, y1), (disp_x2, y2), color, 2)
-                lbl = f"{d.get('name', '')} [{d.get('position', 'C')[0].upper()}]"
-                cv2.putText(display_frame, lbl, (disp_x1 + 4, max(18, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
-
-            # Blit frame to texture
             rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
             if self.camera_image.texture is None or self.camera_image.texture.size != (fw, fh):
                 self.camera_image.texture = Texture.create(size=(fw, fh), colorfmt="rgb")
@@ -688,6 +840,8 @@ class MainScreen(Screen):
             self.network_thread = None
         self.server_detections = []
         self.server_faces = []
+        if hasattr(self, "bbox_overlay"):
+            self.bbox_overlay.clear_boxes()
 
     def _network_loop(self):
         """Streams lightweight compressed JPEG frames to the AI Server."""
@@ -709,38 +863,8 @@ class MainScreen(Screen):
                 continue
 
             try:
-                jpeg_bytes = None
-
-                # Case A: Numpy ndarray (Desktop OpenCV)
-                if hasattr(frame_to_send, "shape"):
-                    h, w = frame_to_send.shape[:2]
-                    scale = 320.0 / max(w, 1)
-                    target_w = 320
-                    target_h = max(1, int(h * scale))
-
-                    if cv2 is not None:
-                        small = cv2.resize(frame_to_send, (target_w, target_h))
-                        ret, jpeg = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 65])
-                        if ret:
-                            jpeg_bytes = jpeg.tobytes()
-                    elif PILImage is not None:
-                        pil_img = PILImage.fromarray(frame_to_send)
-                        buf = io.BytesIO()
-                        pil_img.resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
-                        jpeg_bytes = buf.getvalue()
-
-                # Case B: Kivy Texture (Mobile CoreCamera)
-                elif hasattr(frame_to_send, "pixels"):
-                    tex = frame_to_send
-                    target_w = 320
-                    target_h = max(1, int(320 * tex.height / max(1, tex.width)))
-                    if PILImage is not None:
-                        pil_img = PILImage.frombytes(mode='RGBA', size=tex.size, data=tex.pixels)
-                        buf = io.BytesIO()
-                        pil_img.convert('RGB').resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
-                        jpeg_bytes = buf.getvalue()
-
-                if not jpeg_bytes:
+                image_bytes, mime_type = encode_frame_to_bytes(frame_to_send, target_w=320)
+                if not image_bytes:
                     time.sleep(0.02)
                     continue
 
@@ -752,31 +876,32 @@ class MainScreen(Screen):
                 }
 
                 payload = None
+                ext = "jpg" if mime_type == "image/jpeg" else "bmp"
 
-                # 1. Preferred pure Python urllib multipart (zero pip wheel dependencies)
+                # Pure Python urllib multipart (zero pip wheel dependencies)
                 try:
                     boundary = '----VisionAid' + hex(int(time.time() * 1000))[2:]
                     body = bytearray()
                     for k, v in data.items():
                         body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode('utf-8'))
-                    body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="frame.jpg"\r\nContent-Type: image/jpeg\r\n\r\n'.encode('utf-8'))
-                    body.extend(jpeg_bytes)
+                    body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="frame.{ext}"\r\nContent-Type: {mime_type}\r\n\r\n'.encode('utf-8'))
+                    body.extend(image_bytes)
                     body.extend(f'\r\n--{boundary}--\r\n'.encode('utf-8'))
 
                     req = urllib.request.Request(
                         url,
                         data=bytes(body),
-                        headers={'Content-Type': f'multipart/form-data; boundary={boundary}'}
+                        headers={'Content-Type': f'multipart/form-data; boundary={boundary}', 'User-Agent': 'VisionAid-Mobile'}
                     )
-                    with urllib.request.urlopen(req, timeout=1.4) as resp:
+                    with urllib.request.urlopen(req, timeout=1.8) as resp:
                         if resp.status == 200:
                             payload = json.loads(resp.read().decode('utf-8'))
                 except Exception:
-                    # 2. Fallback to requests if present
+                    # Fallback to requests if present
                     if requests is not None:
                         try:
-                            files = {"file": ("frame.jpg", jpeg_bytes, "image/jpeg")}
-                            r = requests.post(url, files=files, data=data, timeout=1.4)
+                            files = {"file": (f"frame.{ext}", image_bytes, mime_type)}
+                            r = requests.post(url, files=files, data=data, timeout=1.8)
                             if r.status_code == 200:
                                 payload = r.json()
                         except Exception:
@@ -785,7 +910,7 @@ class MainScreen(Screen):
                 if payload is not None:
                     Clock.schedule_once(lambda dt, res=payload: self._on_server_response(res))
                 else:
-                    Clock.schedule_once(lambda dt: setattr(self.hud_banner, "text", "Connecting to AI Server..."))
+                    Clock.schedule_once(lambda dt: setattr(self.hud_banner, "text", "Server offline. Set IP in Settings ⚙️"))
             except Exception:
                 pass
 
@@ -814,6 +939,8 @@ class MainScreen(Screen):
         self.server_detections = res.get("detections", [])
         self.server_faces = res.get("faces", [])
         self.target_locked = res.get("target_locked", False)
+        if hasattr(self, "bbox_overlay"):
+            self.bbox_overlay.update_boxes(self.server_detections)
 
 
 class VisionAidMobileApp(App):

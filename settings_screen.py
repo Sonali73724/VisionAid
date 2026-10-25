@@ -1,4 +1,7 @@
 import os
+import threading
+import urllib.request
+from kivy.clock import Clock
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
@@ -8,6 +11,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.button import Button
 from kivy.uix.image import Image
 from kivy.uix.togglebutton import ToggleButton
+from kivy.uix.textinput import TextInput
 from kivy.graphics import Color, RoundedRectangle, Line
 from kivy.metrics import dp
 
@@ -460,7 +464,92 @@ class SettingsScreen(Screen):
 
         content.add_widget(voice_card)
 
-        # --- CARD 5: ACCOUNT & PROFILE ---
+        # --- CARD 5: AI SERVER CONNECTION ---
+        server_card = LilacCard(orientation="vertical", size_hint_y=None, height=dp(230),
+                                padding=dp(16), spacing=dp(8))
+
+        self.sec_server_title = Label(
+            text=language_manager.get_string("server_card_title", self.settings.language),
+            font_size=12,
+            bold=True,
+            color=C_PINK,
+            size_hint=(1, None),
+            height=dp(20),
+            halign="left"
+        )
+        self.sec_server_title.bind(size=self.sec_server_title.setter("text_size"))
+        server_card.add_widget(self.sec_server_title)
+
+        self.server_desc = Label(
+            text=language_manager.get_string("server_hint", self.settings.language),
+            font_size=11,
+            color=C_TEXT_MUTED,
+            size_hint=(1, None),
+            height=dp(24),
+            halign="left"
+        )
+        self.server_desc.bind(size=self.server_desc.setter("text_size"))
+        server_card.add_widget(self.server_desc)
+
+        input_wrap = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(42), padding=[dp(8), dp(2), dp(8), dp(2)])
+        with input_wrap.canvas.before:
+            Color(0.18, 0.10, 0.28, 0.95)
+            self.input_bg = RoundedRectangle(pos=input_wrap.pos, size=input_wrap.size, radius=[dp(10)])
+            Color(*C_BORDER)
+            self.input_border = Line(rounded_rectangle=(input_wrap.x, input_wrap.y, input_wrap.width, input_wrap.height, dp(10)), width=1.1)
+        input_wrap.bind(pos=lambda *_: (setattr(self.input_bg, "pos", input_wrap.pos), setattr(self.input_border, "rounded_rectangle", (input_wrap.x, input_wrap.y, input_wrap.width, input_wrap.height, dp(10)))),
+                        size=lambda *_: (setattr(self.input_bg, "size", input_wrap.size), setattr(self.input_border, "rounded_rectangle", (input_wrap.x, input_wrap.y, input_wrap.width, input_wrap.height, dp(10)))))
+
+        self.server_input = TextInput(
+            text=self.settings.server_url,
+            multiline=False,
+            font_size=13,
+            foreground_color=C_TEXT_WHITE,
+            hint_text="http://192.168.1.15:8000",
+            hint_text_color=(0.60, 0.50, 0.72, 1),
+            cursor_color=C_PINK,
+            background_normal="",
+            background_active="",
+            background_color=(0, 0, 0, 0),
+            size_hint=(1, 1),
+            padding=[dp(4), dp(8), dp(4), dp(4)]
+        )
+        input_wrap.add_widget(self.server_input)
+        server_card.add_widget(input_wrap)
+
+        preset_row = BoxLayout(orientation="horizontal", size_hint=(1, None), height=dp(28), spacing=dp(8))
+        wifi_btn = Button(text="PC WiFi: 192.168...", font_size=10, background_normal="", background_color=(0.28, 0.15, 0.40, 0.8), color=C_TEXT_MUTED)
+        wifi_btn.bind(on_press=lambda _: setattr(self.server_input, "text", "http://192.168.1.15:8000"))
+        local_btn = Button(text="Localhost: 127.0.0.1", font_size=10, background_normal="", background_color=(0.28, 0.15, 0.40, 0.8), color=C_TEXT_MUTED)
+        local_btn.bind(on_press=lambda _: setattr(self.server_input, "text", "http://127.0.0.1:8000"))
+        preset_row.add_widget(wifi_btn)
+        preset_row.add_widget(local_btn)
+        server_card.add_widget(preset_row)
+
+        self.server_status_lbl = Label(
+            text=f"Current: {self.settings.server_url}",
+            font_size=11,
+            color=C_TEXT_MUTED,
+            size_hint=(1, None),
+            height=dp(18),
+            halign="center"
+        )
+        self.server_status_lbl.bind(size=self.server_status_lbl.setter("text_size"))
+        server_card.add_widget(self.server_status_lbl)
+
+        self.server_test_btn = GradientButton(
+            text=language_manager.get_string("server_test_btn", self.settings.language),
+            font_size=13,
+            bold=True,
+            size_hint=(1, None),
+            height=dp(38)
+        )
+        self.server_test_btn.bind(on_press=self.test_server_connection)
+        server_card.add_widget(self.server_test_btn)
+
+        content.add_widget(server_card)
+
+        # --- CARD 6: ACCOUNT & PROFILE ---
         account_card = LilacCard(radius=16, orientation="vertical", size_hint=(1, None), height=dp(120),
                                  padding=[dp(16), dp(12), dp(16), dp(14)], spacing=dp(8))
 
@@ -556,10 +645,55 @@ class SettingsScreen(Screen):
         self.sec_voice_title.text = language_manager.get_string("voice_assist", lang)
         self.voice_desc.text = language_manager.get_string("voice_rec", lang)
         self.acc_title.text = language_manager.get_string("account_title", lang)
+        if hasattr(self, "sec_server_title"):
+            self.sec_server_title.text = language_manager.get_string("server_card_title", lang)
+        if hasattr(self, "server_desc"):
+            self.server_desc.text = language_manager.get_string("server_hint", lang)
+        if hasattr(self, "server_test_btn"):
+            self.server_test_btn.btn_lbl.text = language_manager.get_string("server_test_btn", lang)
 
         user_info = self.settings.current_user or {"name": "Guest Explorer", "email": "guest@visionaid.ai"}
         lang_info = language_manager.get_language_info(lang)
         self.user_lbl.text = f"User: {user_info.get('name', 'Guest')} • {lang_info['native']}"
+
+    def test_server_connection(self, *args):
+        url = self.server_input.text.strip().rstrip("/")
+        if not url:
+            url = "http://127.0.0.1:8000"
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = "http://" + url
+        self.server_input.text = url
+        self.settings.set_server_url(url)
+        self.server_status_lbl.text = "Checking connection..."
+        self.server_status_lbl.color = C_LILAC
+
+        def _ping():
+            health_url = f"{url}/api/health"
+            try:
+                req = urllib.request.Request(health_url, headers={'User-Agent': 'VisionAid-Mobile'})
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                    if resp.status == 200:
+                        Clock.schedule_once(lambda dt: self._on_ping_success(url))
+                        return
+            except Exception as e:
+                err_str = str(e)
+                Clock.schedule_once(lambda dt: self._on_ping_failed(err_str))
+
+        threading.Thread(target=_ping, daemon=True).start()
+
+    def _on_ping_success(self, url):
+        msg = language_manager.get_string("server_connected", self.settings.language)
+        self.server_status_lbl.text = f"● {msg}"
+        self.server_status_lbl.color = (0.45, 0.90, 0.55, 1)
+        if self.tts:
+            self.tts.speak("Server connected successfully", interrupt=True)
+
+    def _on_ping_failed(self, err_str):
+        msg = language_manager.get_string("server_offline", self.settings.language)
+        self.server_status_lbl.text = f"● {msg}"
+        self.server_status_lbl.color = (0.96, 0.25, 0.37, 1)
+        if self.tts:
+            self.tts.speak("Connection failed. Check server IP address.", interrupt=True)
 
     def _format_speed(self, rate):
         rate = int(rate)

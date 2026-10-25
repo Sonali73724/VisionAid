@@ -35,6 +35,9 @@ orientation = portrait
 # (list) Permissions
 android.permissions = CAMERA, RECORD_AUDIO, INTERNET, ACCESS_NETWORK_STATE, VIBRATE, WAKE_LOCK
 
+# (str) Extra xml to write directly inside the <manifest><application> tag of AndroidManifest.xml
+android.extra_manifest_application_arguments = %(source.dir)s/extra_manifest_application_arguments.xml
+
 # (int) Target Android API, should be as high as possible.
 android.api = 33
 

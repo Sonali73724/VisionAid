@@ -8,7 +8,21 @@ import json
 import hashlib
 import uuid
 
-USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
+def _get_users_file_path():
+    try:
+        from kivy.app import App
+        app = App.get_running_app()
+        if app and getattr(app, "user_data_dir", None):
+            return os.path.join(app.user_data_dir, "users.json")
+    except Exception:
+        pass
+    if "ANDROID_ARGUMENT" in os.environ or "ANDROID_ROOT" in os.environ:
+        home = os.path.expanduser("~")
+        if os.path.exists(home):
+            return os.path.join(home, "users.json")
+    return os.path.join(os.path.dirname(__file__), "users.json")
+
+BUNDLE_USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 
 
 def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
@@ -21,14 +35,26 @@ def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
 class AuthManager:
     """Manages user accounts, credential verification, and user sessions."""
 
-    def __init__(self, storage_path=USERS_FILE):
+    def __init__(self, storage_path=None):
         self.storage_path = storage_path
         self.users = self._load_users()
 
+    def _get_target_path(self):
+        if self.storage_path:
+            return self.storage_path
+        return _get_users_file_path()
+
     def _load_users(self):
-        if os.path.exists(self.storage_path):
+        target = self._get_target_path()
+        file_to_load = None
+        if os.path.exists(target):
+            file_to_load = target
+        elif os.path.exists(BUNDLE_USERS_FILE):
+            file_to_load = BUNDLE_USERS_FILE
+
+        if file_to_load and os.path.exists(file_to_load):
             try:
-                with open(self.storage_path, "r", encoding="utf-8") as f:
+                with open(file_to_load, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
                 print(f"[AuthManager] Error loading users: {e}")
@@ -52,8 +78,12 @@ class AuthManager:
     def _save_users(self, data=None):
         if data is None:
             data = self.users
+        target = self._get_target_path()
         try:
-            with open(self.storage_path, "w", encoding="utf-8") as f:
+            target_dir = os.path.dirname(target)
+            if target_dir:
+                os.makedirs(target_dir, exist_ok=True)
+            with open(target, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             print(f"[AuthManager] Error saving users: {e}")

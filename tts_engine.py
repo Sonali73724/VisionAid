@@ -108,7 +108,15 @@ class TTSEngine:
             return
         self.language = lang_code.strip().lower()
 
-        if self.system == "Windows" and self.speaker:
+        if self.is_android and self.speaker:
+            try:
+                from jnius import autoclass
+                Locale = autoclass('java.util.Locale')
+                self.speaker.setLanguage(Locale(self.language))
+                print(f"Android TTS language set to: {self.language}")
+            except Exception as e:
+                print("Android TTS setLanguage error:", e)
+        elif self.system == "Windows" and self.speaker:
             try:
                 token_id = self._find_voice_token_for_language(self.language)
                 if token_id:
@@ -148,9 +156,18 @@ class TTSEngine:
                         PythonActivity = autoclass('org.kivy.android.PythonActivity')
                         if getattr(PythonActivity, "mActivity", None) is not None:
                             self.speaker = TextToSpeech(PythonActivity.mActivity, None)
+                            if self.language:
+                                Locale = autoclass('java.util.Locale')
+                                self.speaker.setLanguage(Locale(self.language))
                     if self.speaker and hasattr(self.speaker, "speak"):
                         mode = TextToSpeech.QUEUE_FLUSH if interrupt else TextToSpeech.QUEUE_ADD
-                        self.speaker.speak(text, mode, None, None)
+                        try:
+                            self.speaker.speak(text, mode, None, "visionaid_tts")
+                        except Exception:
+                            try:
+                                self.speaker.speak(text, mode, None)
+                            except Exception as sp_err:
+                                print("Android TTS speak fallback error:", sp_err)
                 except Exception as e:
                     print("Android TTS speak error:", e)
 

@@ -40,8 +40,9 @@ If your PC and Android phone are connected to the same WiFi router:
    *(Look for `IPv4 Address`, e.g., `192.168.1.15`)*
 2. In the VisionAid Mobile App on your phone:
    - Tap **SETTINGS** (top-right pill).
-   - Change Server URL to `http://192.168.1.15:8000`.
-   - Your phone will now stream camera frames to your PC and receive real-time guidance!
+   - In the **AI SERVER CONNECTION** card, enter `http://192.168.1.15:8000` (replace with your PC's IP).
+   - Tap **TEST & SAVE CONNECTION**. You will hear "Server connected successfully" and see a green status dot!
+   - Tap **BACK** and tap **Object Detection** or any other mode to start receiving real-time guidance!
 
 ---
 
