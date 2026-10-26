@@ -66,6 +66,12 @@ You can deploy `server.py` to:
 - **Render.com** (Free Web Service)
 - **Hugging Face Spaces** (Free Docker / Python Space)
 
+### Option C: Google Colab (Free T4 GPU + Instant Public URL)
+Open [`VisionAid_Colab.ipynb`](file:///e:/New%20folder/VisionAid/VisionAid_Colab.ipynb) in Google Colab:
+- Enables free Nvidia T4 GPU for ultra-fast YOLO11 & EasyOCR.
+- Uses built-in Cloudflare Tunnel to provide an instant `https://*.trycloudflare.com` URL (no account/token needed).
+- Can also compile the Android `.apk` with Buildozer in a single click!
+
 ---
 
 ## 4. Building the Android APK (Free via GitHub Actions)
