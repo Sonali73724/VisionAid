@@ -25,3 +25,4 @@ Thumbs.db
 # Scratch & temporary logs
 scratch/
 .system_generated/
+.jetro/
