@@ -24,7 +24,7 @@ source.exclude_patterns = *.pt, *.zip, vision_app*.py, *test*.py, *.txt, server.
 # (str) Application versioning
 version = 1.0.0
 
-requirements = python3,kivy,filetype,pyjnius,android
+requirements = python3,kivy,pillow,filetype,pyjnius,android
 
 # (str) The directory in which python-for-android should look for custom build recipes
 p4a.local_recipes = %(source.dir)s/p4a_recipes

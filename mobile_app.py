@@ -149,7 +149,10 @@ class ThreadedCamera:
         # 2. Fallback to Kivy CoreCamera (Native Android / mobile)
         try:
             from kivy.core.camera import Camera as CoreCamera
-            self.core_cam = CoreCamera(index=self.src, resolution=(width, height), stopped=False)
+            try:
+                self.core_cam = CoreCamera(index=self.src, resolution=(width, height), stopped=True)
+            except Exception:
+                self.core_cam = CoreCamera(index=self.src, stopped=True)
             self.core_cam.bind(on_texture=self._on_core_texture)
             self.core_cam.start()
             self.grabbed = True
@@ -235,9 +238,19 @@ def encode_frame_to_bytes(frame_to_send, target_w=320):
     if hasattr(frame_to_send, "pixels"):
         tex = frame_to_send
         tw, th = tex.width, tex.height
-        target_h = max(1, int(target_w * th / max(1, tw)))
+        target_h = max(1, int(target_w * th / max(1, tw))) if tw > 0 else 240
 
-        # Method 2A: Android Native Java Bitmap Compression (Hardware JPEG encoder on device)
+        # Method 2A: Pillow (Ultra-fast compiled C JPEG encoding - ~2ms)
+        if PILImage is not None:
+            try:
+                pil_img = PILImage.frombytes('RGBA', tex.size, tex.pixels)
+                buf = io.BytesIO()
+                pil_img.convert('RGB').resize((target_w, target_h)).save(buf, format="JPEG", quality=60)
+                return buf.getvalue(), "image/jpeg"
+            except Exception:
+                pass
+
+        # Method 2B: Android Native Java Bitmap Compression (Hardware JPEG encoder on device)
         if kivy_platform == 'android':
             try:
                 from jnius import autoclass
@@ -254,53 +267,42 @@ def encode_frame_to_bytes(frame_to_send, target_w=320):
                     bmp.copyPixelsFromBuffer(bb)
                     scaled = Bitmap.createScaledBitmap(bmp, target_w, target_h, True)
                     stream = ByteArrayOutputStream()
-                    scaled.compress(CompressFormat.JPEG, 65, stream)
+                    scaled.compress(CompressFormat.JPEG, 60, stream)
                     jpeg_bytes = bytes(stream.toByteArray())
                     stream.close()
                     bmp.recycle()
                     scaled.recycle()
                     return jpeg_bytes, "image/jpeg"
             except Exception as e:
-                print("Android native JPEG encode error:", e)
+                pass
 
-        # Method 2B: Pillow (if available)
-        if PILImage is not None:
-            try:
-                pil_img = PILImage.frombytes('RGBA', tex.size, tex.pixels)
-                buf = io.BytesIO()
-                pil_img.convert('RGB').resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
-                return buf.getvalue(), "image/jpeg"
-            except Exception as e:
-                print("Pillow texture encode error:", e)
-
-        # Method 2C: Pure Python BMP Encoder (Works 100% everywhere without external packages)
+        # Method 2C: Fast Direct Downsampled BMP Fallback (Zero loops, instantaneous)
         try:
             raw = tex.pixels
             if raw and tw > 0 and th > 0:
-                x_ratio = tw / target_w
-                y_ratio = th / target_h
-                out_rows = bytearray()
-                for y in range(target_h):
-                    src_y = int(y * y_ratio)
-                    row_offset = src_y * tw * 4
-                    row = bytearray(target_w * 3)
-                    for x in range(target_w):
-                        src_x = int(x * x_ratio)
-                        src_idx = row_offset + src_x * 4
-                        row[x * 3] = raw[src_idx + 2]     # B
-                        row[x * 3 + 1] = raw[src_idx + 1] # G
-                        row[x * 3 + 2] = raw[src_idx]     # R
-                    pad = (4 - (target_w * 3) % 4) % 4
+                step_x = max(1, tw // target_w)
+                step_y = max(1, th // target_h)
+                actual_w = tw // step_x
+                actual_h = th // step_y
+                mv = memoryview(raw)
+                row_stride = tw * 4
+                rows = []
+                for y in range(0, actual_h * step_y, step_y):
+                    row_data = mv[y * row_stride : (y + 1) * row_stride]
+                    sampled_bgr = bytearray()
+                    for x in range(0, actual_w * step_x * 4, step_x * 4):
+                        sampled_bgr.extend([row_data[x+2], row_data[x+1], row_data[x]])
+                    pad = (4 - len(sampled_bgr) % 4) % 4
                     if pad:
-                        row.extend(b'\x00' * pad)
-                    out_rows.extend(row)
-
+                        sampled_bgr.extend(b'\x00' * pad)
+                    rows.append(sampled_bgr)
+                out_rows = b''.join(rows)
                 file_size = 54 + len(out_rows)
                 header = struct.pack('<2sIHHI', b'BM', file_size, 0, 0, 54)
-                info = struct.pack('<IiiHHIIIIII', 40, target_w, -target_h, 1, 24, 0, len(out_rows), 2835, 2835, 0, 0)
-                return header + info + bytes(out_rows), "image/bmp"
-        except Exception as e:
-            print("Pure Python BMP encode error:", e)
+                info = struct.pack('<IiiHHIIIIII', 40, actual_w, -actual_h, 1, 24, 0, len(out_rows), 2835, 2835, 0, 0)
+                return header + info + out_rows, "image/bmp"
+        except Exception:
+            pass
 
     return None, None
 
@@ -541,11 +543,55 @@ class SettingsPillButton(ButtonBehavior, BoxLayout):
         self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(14))
 
 
+class FlipCameraButton(ButtonBehavior, BoxLayout):
+    """Floating pill button on the camera viewport to switch between back and front cameras."""
+    def __init__(self, on_press_callback=None, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = "horizontal"
+        self.size_hint = (None, None)
+        self.size = (dp(78), dp(34))
+        self.padding = [dp(7), dp(4), dp(8), dp(4)]
+        self.spacing = dp(5)
+        self.pos_hint = {"right": 0.97, "top": 0.96}
+        self.on_press_callback = on_press_callback
+
+        with self.canvas.before:
+            Color(0.20, 0.10, 0.32, 0.88)
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(17)])
+            Color(0.75, 0.52, 0.98, 0.85)
+            self.border_line = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(17)), width=1.2)
+
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        cam_icon = Image(source=ICON_CAMERA, size_hint=(None, 1), width=dp(18), fit_mode="contain", color=C_PINK)
+        self.lbl = Label(text="FLIP", font_size=11, bold=True, color=C_TEXT_WHITE, halign="center", valign="middle")
+        self.add_widget(cam_icon)
+        self.add_widget(self.lbl)
+
+    def _update_canvas(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+        self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(17))
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            self.opacity = 0.7
+            if self.on_press_callback:
+                self.on_press_callback()
+            return True
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        self.opacity = 1.0
+        return super().on_touch_up(touch)
+
+
 class MainScreen(Screen):
     """Mobile dashboard streaming frames to VisionAid AI Server."""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.camera = None
+        self.camera_index = 0
         self.mode = None
         self.find_target = "cup"
         self.target_locked = False
@@ -604,7 +650,7 @@ class MainScreen(Screen):
             self.vp_border = Line(rounded_rectangle=(0, 0, vp_wrapper.width, vp_wrapper.height, dp(18)), width=1.5)
         vp_wrapper.bind(size=lambda _, s: (setattr(self.vp_bg, "size", s), setattr(self.vp_border, "rounded_rectangle", (0, 0, s[0], s[1], dp(18)))))
 
-        self.camera_image = Image(fit_mode="contain", size_hint=(1, 1), pos_hint={"x": 0, "y": 0}, opacity=0)
+        self.camera_image = Image(fit_mode="contain", allow_stretch=True, keep_ratio=True, size_hint=(1, 1), pos_hint={"x": 0, "y": 0}, opacity=0)
 
         # Standby Placeholder
         self.placeholder = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(14), size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
@@ -627,9 +673,11 @@ class MainScreen(Screen):
                              size=lambda *_: (setattr(self.hud_bg, "size", self.hud_banner.size), setattr(self.hud_border, "rounded_rectangle", (self.hud_banner.x, self.hud_banner.y, self.hud_banner.width, self.hud_banner.height, dp(12)))))
 
         self.bbox_overlay = BoundingBoxOverlay()
+        self.btn_flip = FlipCameraButton(on_press_callback=self.switch_camera)
         vp_wrapper.add_widget(self.placeholder)
         vp_wrapper.add_widget(self.camera_image)
         vp_wrapper.add_widget(self.bbox_overlay)
+        vp_wrapper.add_widget(self.btn_flip)
         vp_wrapper.add_widget(self.hud_banner)
         root.add_widget(vp_wrapper)
 
@@ -743,7 +791,7 @@ class MainScreen(Screen):
 
         if self.camera is not None and self.camera.is_opened():
             return True
-        self.camera = ThreadedCamera(0, 640, 480)
+        self.camera = ThreadedCamera(self.camera_index, 640, 480)
         if not self.camera.is_opened():
             err_msg = language_manager.get_string("camera_error")
             self.hud_banner.text = err_msg
@@ -754,6 +802,19 @@ class MainScreen(Screen):
         self.camera_image.opacity = 1
         self._start_network_worker()
         return True
+
+    def switch_camera(self, *args):
+        """Toggle between back camera (0) and front selfie camera (1)."""
+        self.camera_index = 1 if self.camera_index == 0 else 0
+        cam_name = "Front Camera" if self.camera_index == 1 else "Back Camera"
+        if self.camera is not None and self.camera.is_opened():
+            self.camera.release()
+            self.camera = ThreadedCamera(self.camera_index, 640, 480)
+            self.hud_banner.text = f"Switched to {cam_name}"
+            speak(f"{cam_name} active", interrupt=True)
+        else:
+            self.hud_banner.text = f"Selected {cam_name}"
+            speak(f"{cam_name} selected", interrupt=True)
 
     def stop_camera(self, *args):
         Clock.unschedule(self.update_camera)
@@ -814,6 +875,9 @@ class MainScreen(Screen):
         # Case A: Kivy Texture (Mobile Android CoreCamera)
         if hasattr(frame, 'pixels') or not hasattr(frame, 'shape'):
             self.camera_image.texture = frame
+            if hasattr(frame, 'size'):
+                self.camera_image.texture_size = list(frame.size)
+            self.camera_image.canvas.ask_update()
             return
 
         # Case B: Numpy ndarray (Desktop OpenCV)
@@ -825,6 +889,7 @@ class MainScreen(Screen):
                 self.camera_image.texture = Texture.create(size=(fw, fh), colorfmt="rgb")
             self.camera_image.texture.blit_buffer(rgb.tobytes(), colorfmt="rgb", bufferfmt="ubyte")
             self.camera_image.texture.flip_vertical()
+            self.camera_image.canvas.ask_update()
 
     def _start_network_worker(self):
         if self.network_running:
@@ -845,9 +910,10 @@ class MainScreen(Screen):
 
     def _network_loop(self):
         """Streams lightweight compressed JPEG frames to the AI Server."""
+        offline_ticks = 0
         while self.network_running:
             if self.mode is None:
-                time.sleep(0.05)
+                time.sleep(0.08)
                 continue
 
             frame_to_send = None
@@ -859,13 +925,13 @@ class MainScreen(Screen):
                         frame_to_send = self.latest_frame
 
             if frame_to_send is None:
-                time.sleep(0.02)
+                time.sleep(0.04)
                 continue
 
             try:
                 image_bytes, mime_type = encode_frame_to_bytes(frame_to_send, target_w=320)
                 if not image_bytes:
-                    time.sleep(0.02)
+                    time.sleep(0.04)
                     continue
 
                 url = f"{settings.server_url}/api/analyze"
@@ -893,7 +959,7 @@ class MainScreen(Screen):
                         data=bytes(body),
                         headers={'Content-Type': f'multipart/form-data; boundary={boundary}', 'User-Agent': 'VisionAid-Mobile'}
                     )
-                    with urllib.request.urlopen(req, timeout=1.8) as resp:
+                    with urllib.request.urlopen(req, timeout=1.4) as resp:
                         if resp.status == 200:
                             payload = json.loads(resp.read().decode('utf-8'))
                 except Exception:
@@ -901,20 +967,23 @@ class MainScreen(Screen):
                     if requests is not None:
                         try:
                             files = {"file": (f"frame.{ext}", image_bytes, mime_type)}
-                            r = requests.post(url, files=files, data=data, timeout=1.8)
+                            r = requests.post(url, files=files, data=data, timeout=1.4)
                             if r.status_code == 200:
                                 payload = r.json()
                         except Exception:
                             pass
 
                 if payload is not None:
+                    offline_ticks = 0
                     Clock.schedule_once(lambda dt, res=payload: self._on_server_response(res))
+                    time.sleep(0.12)  # ~8 FPS smooth streaming
                 else:
-                    Clock.schedule_once(lambda dt: setattr(self.hud_banner, "text", "Server offline. Set IP in Settings ⚙️"))
+                    offline_ticks += 1
+                    if offline_ticks % 4 == 1:
+                        Clock.schedule_once(lambda dt: setattr(self.hud_banner, "text", "Server offline. Set IP in Settings ⚙️"))
+                    time.sleep(0.70)  # Back off smoothly when server is unreachable to avoid UI hang
             except Exception:
-                pass
-
-            time.sleep(0.08)  # ~12 requests per second
+                time.sleep(0.50)
 
     def _on_server_response(self, res):
         if self.mode != res.get("mode"):
