@@ -3,6 +3,8 @@ VisionAid - Authentication & Profile Manager
 Handles user registration, credential hashing with salt, and persistent user sessions in users.json.
 """
 
+from __future__ import annotations
+
 import os
 import json
 import hashlib
