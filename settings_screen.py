@@ -670,13 +670,20 @@ class SettingsScreen(Screen):
         def _ping():
             health_url = f"{url}/api/health"
             try:
+                import ssl
+                ctx = None
+                try:
+                    ctx = ssl._create_unverified_context()
+                except Exception:
+                    pass
                 req = urllib.request.Request(health_url, headers={'User-Agent': 'VisionAid-Mobile'})
-                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                with urllib.request.urlopen(req, timeout=6.0, context=ctx) as resp:
                     if resp.status == 200:
                         Clock.schedule_once(lambda dt: self._on_ping_success(url))
                         return
             except Exception as e:
                 err_str = str(e)
+                print("Server ping exception:", err_str)
                 Clock.schedule_once(lambda dt: self._on_ping_failed(err_str))
 
         threading.Thread(target=_ping, daemon=True).start()

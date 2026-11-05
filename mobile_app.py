@@ -959,7 +959,13 @@ class MainScreen(Screen):
                         data=bytes(body),
                         headers={'Content-Type': f'multipart/form-data; boundary={boundary}', 'User-Agent': 'VisionAid-Mobile'}
                     )
-                    with urllib.request.urlopen(req, timeout=1.4) as resp:
+                    import ssl
+                    _ssl_ctx = None
+                    try:
+                        _ssl_ctx = ssl._create_unverified_context()
+                    except Exception:
+                        pass
+                    with urllib.request.urlopen(req, timeout=2.8, context=_ssl_ctx) as resp:
                         if resp.status == 200:
                             payload = json.loads(resp.read().decode('utf-8'))
                 except Exception:
