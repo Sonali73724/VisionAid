@@ -37,11 +37,12 @@ app.add_middleware(
 print("Starting VisionAid AI Server...")
 print("Loading YOLO11...")
 model = YOLO("yolo11n.pt")
-print("Loading EasyOCR...")
-ocr_reader = easyocr.Reader(["en"], gpu=torch.cuda.is_available())
+print("✅ YOLO11 loaded successfully!")
+# EasyOCR is lazy-loaded on demand only when mode == 'text' to prevent startup delay/hangs
+ocr_reader = None
 print("Loading FaceAnalyzer...")
 face_analyzer = FaceAnalyzer()
-print("✅ All AI models initialized successfully!")
+print("✅ AI models initialized successfully!")
 
 
 class AuthRequest(BaseModel):
@@ -81,7 +82,7 @@ def register(req: RegisterRequest):
 
 
 @app.post("/api/analyze")
-async def analyze_frame(
+def analyze_frame(
     file: UploadFile = File(...),
     mode: str = Form("object"),
     find_target: str = Form("cup"),
@@ -91,7 +92,10 @@ async def analyze_frame(
     Core vision endpoint: processes mobile camera frame and returns
     bounding boxes, spatial cues, and audio instructions.
     """
-    contents = await file.read()
+    try:
+        contents = file.file.read()
+    except Exception:
+        contents = b""
     nparr = np.frombuffer(contents, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
@@ -114,21 +118,30 @@ async def analyze_frame(
 
     language_manager.set_language(language)
 
+    OBJECT_ALIASES = {
+        "cell phone": "mobile phone",
+        "dining table": "table",
+        "tv": "monitor",
+        "couch": "sofa",
+        "potted plant": "plant",
+    }
+
     # 1. OBJECT, OBSTACLE, RADAR, FIND MODES (YOLO)
     if mode in ("object", "obstacle", "radar", "find"):
-        results = model(frame, imgsz=320, conf=0.45, verbose=False)
+        results = model(frame, imgsz=320, conf=0.30, iou=0.45, verbose=False)
         detections = []
 
         for box in results[0].boxes:
             conf = float(box.conf[0])
-            if conf < 0.45:
+            if conf < 0.30:
                 continue
             x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
-            obj_name = model.names[int(box.cls[0])]
+            raw_name = model.names[int(box.cls[0])]
+            obj_name = OBJECT_ALIASES.get(raw_name, raw_name)
             cx = (x1 + x2) / 2.0
             cy = (y1 + y2) / 2.0
-            box_area = float((x2 - x1) * (y2 - y1))
-            area_ratio = box_area / frame_area
+            box_area = float(max(0, x2 - x1) * max(0, y2 - y1))
+            area_ratio = box_area / max(1.0, frame_area)
 
             # Spatial horizontal location
             if cx < w * 0.35:
@@ -145,15 +158,27 @@ async def analyze_frame(
             else:
                 proximity = "distant"
 
+            norm_bbox = [
+                round(max(0.0, min(1.0, x1 / float(w))), 4),
+                round(max(0.0, min(1.0, y1 / float(h))), 4),
+                round(max(0.0, min(1.0, x2 / float(w))), 4),
+                round(max(0.0, min(1.0, y2 / float(h))), 4),
+            ]
+
             detections.append({
                 "name": obj_name,
-                "conf": conf,
+                "raw_name": raw_name,
+                "conf": round(conf, 2),
+                "confidence_pct": int(round(conf * 100)),
                 "bbox": [x1, y1, x2, y2],
+                "norm_bbox": norm_bbox,
                 "area_ratio": area_ratio,
                 "position": position,
                 "proximity": proximity,
                 "cx": cx,
-                "cy": cy
+                "cy": cy,
+                "frame_w": w,
+                "frame_h": h,
             })
 
         detections.sort(key=lambda d: d["area_ratio"], reverse=True)
@@ -163,21 +188,12 @@ async def analyze_frame(
         if mode == "object":
             if detections:
                 top = detections[:3]
-                items = [f"{language_manager.translate_label(d['name'], language)} ({d['position']})" for d in top]
+                items = [f"{language_manager.translate_label(d['name'], language)} ({d['confidence_pct']}%)" for d in top]
                 response["hud_text"] = " • ".join(items)
-                if language == "hi":
-                    phrases = []
-                    for d in top:
-                        pos_en = 'directly in front of you' if d['position'] == 'center' else ('on your ' + d['position'])
-                        pos_hi = language_manager.translate_position(pos_en, 'hi')
-                        lbl_hi = language_manager.translate_label(d['name'], 'hi')
-                        phrases.append(f"{pos_hi} {lbl_hi}")
-                    response["speech_text"] = "मुझे " + ", और ".join(phrases) + " दिख रहे हैं।"
-                else:
-                    phrases = [f"a {d['name']} on your {d['position']}" if d['position'] != 'center' else f"a {d['name']} in front" for d in top]
-                    response["speech_text"] = "I see " + ", and ".join(phrases) + "."
+                response["speech_text"] = language_manager.format_object_announcement(detections, language)
             else:
-                response["hud_text"] = language_manager.get_string("banner_detecting", language)
+                response["hud_text"] = language_manager.get_string("no_objects_detected", language)
+                response["speech_text"] = None
 
         elif mode == "obstacle":
             if detections:
@@ -243,15 +259,26 @@ async def analyze_frame(
 
     # 3. TEXT OCR
     elif mode == "text":
-        scale = 384.0 / max(w, 1)
-        small = cv2.resize(frame, (384, int(h * scale)))
-        ocr_res = ocr_reader.readtext(small)
-        text_lines = [r[1].strip() for r in ocr_res if r[2] >= 0.40 and len(r[1].strip()) > 1]
-        full_text = " ".join(text_lines)
-        response["read_text"] = full_text
-        if full_text:
-            response["hud_text"] = f"Read: {full_text[:50]}..."
-            response["speech_text"] = language_manager.format_text_reading(full_text, code=language)
+        if ocr_reader is None:
+            try:
+                _easyocr_dir = os.path.join(os.path.dirname(__file__), "data", "easyocr")
+                os.makedirs(_easyocr_dir, exist_ok=True)
+                ocr_reader = easyocr.Reader(["en"], gpu=torch.cuda.is_available(), model_storage_directory=_easyocr_dir, user_network_directory=_easyocr_dir)
+            except Exception as _oe:
+                ocr_reader = None
+
+        if ocr_reader is not None:
+            scale = 384.0 / max(w, 1)
+            small = cv2.resize(frame, (384, int(h * scale)))
+            ocr_res = ocr_reader.readtext(small)
+            text_lines = [r[1].strip() for r in ocr_res if r[2] >= 0.40 and len(r[1].strip()) > 1]
+            full_text = " ".join(text_lines)
+            response["read_text"] = full_text
+            if full_text:
+                response["hud_text"] = f"Read: {full_text[:50]}..."
+                response["speech_text"] = language_manager.format_text_reading(full_text, code=language)
+            else:
+                response["hud_text"] = "Scanning for text..."
         else:
             response["hud_text"] = "Scanning for text..."
 

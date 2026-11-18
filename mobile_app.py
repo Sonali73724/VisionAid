@@ -28,6 +28,19 @@ try:
 except ImportError:
     PILImage = None
 
+try:
+    from ultralytics import YOLO as LocalYOLO
+except ImportError:
+    LocalYOLO = None
+
+OBJECT_ALIASES = {
+    "cell phone": "mobile phone",
+    "dining table": "table",
+    "tv": "monitor",
+    "couch": "sofa",
+    "potted plant": "plant",
+}
+
 
 # Kivy configuration for Mobile Display (Desktop preview only)
 from kivy.utils import platform as kivy_platform
@@ -313,44 +326,114 @@ class BoundingBoxOverlay(Widget):
         super().__init__(**kwargs)
         self.detections = []
         self.size_hint = (1, 1)
+        self.is_mirrored = (cv2 is not None)
+        self.label_pool = []
+        for _ in range(8):
+            lbl = Label(
+                text="",
+                font_size=10,
+                bold=True,
+                color=(1, 1, 1, 1),
+                size_hint=(None, None),
+                height=dp(18),
+                opacity=0
+            )
+            with lbl.canvas.before:
+                lbl._bg_color = Color(0.12, 0.06, 0.20, 0.85)
+                lbl._bg_rect = RoundedRectangle(pos=lbl.pos, size=lbl.size, radius=[dp(4)])
+                lbl._border_color = Color(0.75, 0.52, 0.98, 0.9)
+                lbl._border_line = Line(rounded_rectangle=(lbl.x, lbl.y, lbl.width, lbl.height, dp(4)), width=1.0)
+            lbl.bind(
+                pos=lambda inst, val: (
+                    setattr(inst._bg_rect, "pos", val),
+                    setattr(inst._border_line, "rounded_rectangle", (val[0], val[1], inst.width, inst.height, dp(4)))
+                ),
+                size=lambda inst, val: (
+                    setattr(inst._bg_rect, "size", val),
+                    setattr(inst._border_line, "rounded_rectangle", (inst.x, inst.y, val[0], val[1], dp(4)))
+                )
+            )
+            self.add_widget(lbl)
+            self.label_pool.append(lbl)
+
         self.bind(pos=lambda *_: self.draw_boxes(), size=lambda *_: self.draw_boxes())
 
-    def update_boxes(self, detections):
+    def update_boxes(self, detections, is_mirrored=None):
+        if is_mirrored is not None:
+            self.is_mirrored = is_mirrored
         self.detections = detections or []
         self.draw_boxes()
 
     def clear_boxes(self):
         self.detections = []
         self.canvas.clear()
+        for lbl in self.label_pool:
+            lbl.opacity = 0
 
     def draw_boxes(self):
         self.canvas.clear()
         if not self.detections or self.width <= 0 or self.height <= 0:
+            for lbl in self.label_pool:
+                lbl.opacity = 0
             return
 
         with self.canvas:
-            for d in self.detections[:6]:
-                bbox = d.get("bbox", [0, 0, 0, 0])
-                x1, y1, x2, y2 = bbox
-                # Server coordinates relative to 320x240 image sent
-                norm_x1 = max(0.0, min(1.0, x1 / 320.0))
-                norm_x2 = max(0.0, min(1.0, x2 / 320.0))
-                norm_y1 = max(0.0, min(1.0, y1 / 240.0))
-                norm_y2 = max(0.0, min(1.0, y2 / 240.0))
+            for i, d in enumerate(self.detections[:8]):
+                norm = d.get("norm_bbox")
+                if norm and len(norm) == 4:
+                    norm_x1, norm_y1, norm_x2, norm_y2 = norm
+                else:
+                    fw = float(d.get("frame_w", 320.0)) or 320.0
+                    fh = float(d.get("frame_h", 240.0)) or 240.0
+                    bbox = d.get("bbox", [0, 0, 0, 0])
+                    norm_x1 = bbox[0] / fw
+                    norm_y1 = bbox[1] / fh
+                    norm_x2 = bbox[2] / fw
+                    norm_y2 = bbox[3] / fh
 
-                w = max(dp(12), (norm_x2 - norm_x1) * self.width)
-                h = max(dp(12), (norm_y2 - norm_y1) * self.height)
-                # Kivy y=0 is at bottom, so flip y
-                x = self.x + norm_x1 * self.width
+                norm_x1 = max(0.0, min(1.0, norm_x1))
+                norm_x2 = max(0.0, min(1.0, norm_x2))
+                norm_y1 = max(0.0, min(1.0, norm_y1))
+                norm_y2 = max(0.0, min(1.0, norm_y2))
+
+                # If preview is mirrored (desktop webcam or selfie camera)
+                if self.is_mirrored:
+                    disp_x1 = 1.0 - norm_x2
+                    disp_x2 = 1.0 - norm_x1
+                else:
+                    disp_x1 = norm_x1
+                    disp_x2 = norm_x2
+
+                w = max(dp(16), (disp_x2 - disp_x1) * self.width)
+                h = max(dp(16), (norm_y2 - norm_y1) * self.height)
+                x = self.x + disp_x1 * self.width
                 y = self.y + (1.0 - norm_y2) * self.height
 
                 pos = d.get("position", "center")
                 if pos == "center":
-                    Color(0.96, 0.45, 0.71, 0.95)  # Blossom Pink
+                    box_color = (0.96, 0.45, 0.71, 0.95)  # Blossom Pink
                 else:
-                    Color(0.75, 0.52, 0.98, 0.95)  # Radiant Lilac
+                    box_color = (0.75, 0.52, 0.98, 0.95)  # Radiant Lilac
 
-                Line(rounded_rectangle=(x, y, w, h, dp(6)), width=1.8)
+                Color(*box_color)
+                Line(rounded_rectangle=(x, y, w, h, dp(6)), width=2.0)
+
+                # Render badge label
+                if i < len(self.label_pool):
+                    lbl = self.label_pool[i]
+                    name = d.get("name", "object")
+                    conf_pct = d.get("confidence_pct", int(d.get("conf", 0.0) * 100))
+                    lbl.text = f" {name.upper()} {conf_pct}% "
+                    lbl._border_color.rgba = box_color
+                    lbl.texture_update()
+                    lbl_w = max(dp(44), lbl.texture_size[0] + dp(8))
+                    lbl_h = dp(18)
+                    lbl.size = (lbl_w, lbl_h)
+                    lbl.pos = (x, min(self.y + self.height - lbl_h - dp(2), max(self.y + dp(2), y + h - dp(2))))
+                    lbl.opacity = 1
+
+            for j in range(len(self.detections), len(self.label_pool)):
+                self.label_pool[j].opacity = 0
 
 
 class GradientActionCard(ButtonBehavior, BoxLayout):
@@ -604,6 +687,14 @@ class MainScreen(Screen):
         self.server_detections = []
         self.server_faces = []
 
+        # Local inference fallback & speech interval control
+        self.local_model = None
+        self.local_model_failed = False
+        self.speech_interval = 3.5
+        self.last_speech_time = 0
+        self.last_spoken_text = ""
+        self.last_spoken_key = ""
+
         self._build_ui()
         self.update_language()
 
@@ -827,6 +918,9 @@ class MainScreen(Screen):
         self.camera_image.texture = None
         self.camera_image.opacity = 0
         self.placeholder.opacity = 1
+        self.last_spoken_text = ""
+        self.last_spoken_key = ""
+        self.last_speech_time = 0
         if hasattr(self, "bbox_overlay"):
             self.bbox_overlay.clear_boxes()
         self.status_pill.text = language_manager.get_string("status_standby")
@@ -985,9 +1079,86 @@ class MainScreen(Screen):
                     time.sleep(0.12)  # ~8 FPS smooth streaming
                 else:
                     offline_ticks += 1
-                    if offline_ticks % 4 == 1:
+                    # Seamless local YOLO fallback when server is unreachable or offline
+                    if LocalYOLO is not None and not self.local_model_failed and hasattr(frame_to_send, "shape") and self.mode in ("object", "obstacle", "find"):
+                        if self.local_model is None:
+                            try:
+                                yolo_path = os.path.join(BASE_DIR, "yolo11n.pt")
+                                if os.path.exists(yolo_path):
+                                    self.local_model = LocalYOLO(yolo_path)
+                                else:
+                                    self.local_model = LocalYOLO("yolo11n.pt")
+                            except Exception as le:
+                                print("Local YOLO fallback error:", le)
+                                self.local_model_failed = True
+
+                        if self.local_model is not None:
+                            try:
+                                local_res = self.local_model(frame_to_send, imgsz=320, conf=0.30, iou=0.45, verbose=False)
+                                fh, fw = frame_to_send.shape[:2]
+                                f_area = float(fw * fh)
+                                dets = []
+                                for box in local_res[0].boxes:
+                                    conf = float(box.conf[0])
+                                    if conf < 0.30:
+                                        continue
+                                    x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+                                    raw_name = self.local_model.names[int(box.cls[0])]
+                                    obj_name = OBJECT_ALIASES.get(raw_name, raw_name)
+                                    cx = (x1 + x2) / 2.0
+                                    cy = (y1 + y2) / 2.0
+                                    box_area = float(max(0, x2 - x1) * max(0, y2 - y1))
+                                    area_ratio = box_area / max(1.0, f_area)
+                                    pos = "left" if cx < fw * 0.35 else ("right" if cx > fw * 0.65 else "center")
+                                    prox = "close" if area_ratio >= 0.18 else ("nearby" if area_ratio >= 0.04 else "distant")
+                                    norm_bbox = [
+                                        round(max(0.0, min(1.0, x1 / float(fw))), 4),
+                                        round(max(0.0, min(1.0, y1 / float(fh))), 4),
+                                        round(max(0.0, min(1.0, x2 / float(fw))), 4),
+                                        round(max(0.0, min(1.0, y2 / float(fh))), 4),
+                                    ]
+                                    dets.append({
+                                        "name": obj_name,
+                                        "raw_name": raw_name,
+                                        "conf": round(conf, 2),
+                                        "confidence_pct": int(round(conf * 100)),
+                                        "bbox": [x1, y1, x2, y2],
+                                        "norm_bbox": norm_bbox,
+                                        "area_ratio": area_ratio,
+                                        "position": pos,
+                                        "proximity": prox,
+                                        "cx": cx,
+                                        "cy": cy,
+                                        "frame_w": fw,
+                                        "frame_h": fh,
+                                    })
+                                dets.sort(key=lambda d: d["area_ratio"], reverse=True)
+                                lang = settings.language or "en"
+                                if dets:
+                                    top = dets[:3]
+                                    items = [f"{language_manager.translate_label(d['name'], lang)} ({d['confidence_pct']}%)" for d in top]
+                                    hud = " • ".join(items)
+                                    speech = language_manager.format_object_announcement(dets, lang)
+                                else:
+                                    hud = language_manager.get_string("no_objects_detected", lang)
+                                    speech = None
+
+                                fallback_payload = {
+                                    "mode": self.mode,
+                                    "hud_text": hud,
+                                    "speech_text": speech,
+                                    "detections": dets,
+                                    "target_locked": False,
+                                }
+                                Clock.schedule_once(lambda dt, res=fallback_payload: self._on_server_response(res))
+                                time.sleep(0.08)
+                                continue
+                            except Exception as infer_err:
+                                print("Local inference exception:", infer_err)
+
+                    if offline_ticks % 8 == 1:
                         Clock.schedule_once(lambda dt: setattr(self.hud_banner, "text", "Server offline. Set IP in Settings ⚙️"))
-                    time.sleep(0.70)  # Back off smoothly when server is unreachable to avoid UI hang
+                    time.sleep(0.50)  # Back off smoothly when server is unreachable to avoid UI hang
             except Exception:
                 time.sleep(0.50)
 
@@ -995,8 +1166,15 @@ class MainScreen(Screen):
         if self.mode != res.get("mode"):
             return
 
-        if res.get("hud_text"):
-            self.hud_banner.text = res["hud_text"]
+        dets = res.get("detections", [])
+        if dets:
+            if res.get("hud_text"):
+                self.hud_banner.text = res["hud_text"]
+        else:
+            if self.mode == "object":
+                self.hud_banner.text = language_manager.get_string("no_objects_detected", settings.language)
+            elif res.get("hud_text"):
+                self.hud_banner.text = res["hud_text"]
 
         if res.get("play_sound"):
             snd = res["play_sound"]
@@ -1008,14 +1186,27 @@ class MainScreen(Screen):
             elif snd == "beacon_ping":
                 sound_manager.play_beacon(is_locked=False)
 
-        if res.get("speech_text"):
-            speak(res["speech_text"])
+        speech_text = res.get("speech_text")
+        if speech_text and self.mode == "object":
+            now = time.time()
+            obj_key = "_".join([f"{d.get('name')}_{d.get('position')}" for d in dets[:3]])
+            if (obj_key != self.last_spoken_key) or (now - self.last_speech_time >= self.speech_interval):
+                if (speech_text != self.last_spoken_text) or (now - self.last_speech_time >= self.speech_interval):
+                    speak(speech_text)
+                    self.last_spoken_text = speech_text
+                    self.last_spoken_key = obj_key
+                    self.last_speech_time = now
+        elif speech_text and self.mode != "object":
+            speak(speech_text)
 
-        self.server_detections = res.get("detections", [])
+        self.server_detections = dets
         self.server_faces = res.get("faces", [])
         self.target_locked = res.get("target_locked", False)
         if hasattr(self, "bbox_overlay"):
-            self.bbox_overlay.update_boxes(self.server_detections)
+            if dets:
+                self.bbox_overlay.update_boxes(dets, is_mirrored=(self.camera_index == 1 or cv2 is not None))
+            else:
+                self.bbox_overlay.clear_boxes()
 
 
 class VisionAidMobileApp(App):

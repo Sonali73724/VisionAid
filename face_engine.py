@@ -17,9 +17,14 @@ class FaceAnalyzer:
 
     def __init__(self, profiles_file=PROFILES_PATH):
         self.profiles_file = profiles_file
-        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        self.smile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_smile.xml")
-        
+        self.face_cascade = None
+        self.smile_cascade = None
+        if hasattr(cv2, "CascadeClassifier") and hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+            try:
+                self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+                self.smile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_smile.xml")
+            except Exception as e:
+                print(f"[FaceAnalyzer] Haar cascades unavailable: {e}")
         self.profiles = self._load_profiles()
 
     def _load_profiles(self):
@@ -67,7 +72,7 @@ class FaceAnalyzer:
         Analyze faces in the given BGR frame.
         Returns a list of face information dicts.
         """
-        if frame is None:
+        if frame is None or self.face_cascade is None:
             return []
 
         h, w = frame.shape[:2]

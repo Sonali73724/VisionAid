@@ -94,6 +94,7 @@ TRANSLATIONS = {
         "banner_standby": "System ready to assist you.",
         "banner_monitoring": "Monitoring path for obstacles...",
         "banner_detecting": "Identifying objects in surroundings...",
+        "no_objects_detected": "No objects detected",
         "banner_reading": "Align camera with text...",
         "banner_radar": "Scanning spatial proximity...",
         "banner_face": "Scanning for faces & expressions...",
@@ -192,6 +193,7 @@ TRANSLATIONS = {
         "banner_standby": "सिस्टम आपकी सहायता के लिए तैयार है।",
         "banner_monitoring": "रास्ते में बाधाओं की निगरानी जारी है...",
         "banner_detecting": "आस-पास की वस्तुओं की पहचान जारी है...",
+        "no_objects_detected": "कोई वस्तु नहीं दिखी",
         "banner_reading": "कैमरे को टेक्स्ट के सामने रखें...",
         "banner_radar": "दूरी और दिशा स्कैन की जा रही है...",
         "banner_face": "चेहरे और भाव स्कैन किए जा रहे हैं...",
@@ -286,6 +288,7 @@ TRANSLATIONS = {
         "status_cam_error": "ERROR CÁMARA",
         "status_listening": "ESCUCHANDO",
         "banner_standby": "Sistema listo para ayudarle.",
+        "no_objects_detected": "No se detectaron objetos",
         "card_find_title": "Buscar Objeto",
         "card_object_title": "Detección de Objetos",
         "card_radar_title": "Radar Espacial",
@@ -347,6 +350,7 @@ TRANSLATIONS = {
         "status_cam_error": "ERREUR CAM",
         "status_listening": "ÉCOUTE",
         "banner_standby": "Système prêt à vous assister.",
+        "no_objects_detected": "Aucun objet détecté",
         "card_find_title": "Trouver Objet",
         "card_object_title": "Détection d'Objets",
         "card_radar_title": "Radar Spatial",
@@ -408,6 +412,7 @@ TRANSLATIONS = {
         "status_cam_error": "KAMERA-FEHLER",
         "status_listening": "HÖREN",
         "banner_standby": "System bereit zu helfen.",
+        "no_objects_detected": "Keine Objekte erkannt",
         "card_find_title": "Objekt Suchen",
         "card_object_title": "Objekterkennung",
         "card_radar_title": "Raum-Radar",
@@ -469,6 +474,7 @@ TRANSLATIONS = {
         "status_cam_error": "カメラエラー",
         "status_listening": "聞き取り中",
         "banner_standby": "アシスタントの準備が完了しました。",
+        "no_objects_detected": "物体は検出されませんでした",
         "card_find_title": "物を探す",
         "card_object_title": "物体認識",
         "card_radar_title": "空間レーダー",
@@ -673,6 +679,59 @@ class LanguageManager:
             d = self.translate_distance(dist, c)
             return f"मुझे {p} {d} पर {lbl} दिख रहा है।"
         return f"I see a {label} {dist} {pos}."
+
+    def format_object_announcement(self, detections, code=None):
+        """Build clear, non-repetitive audio guidance matching spatial directions."""
+        if not detections:
+            return None
+        c = code or self.current_code
+        top = detections[:3]
+        if c == "hi":
+            phrases = []
+            for d in top:
+                lbl = self.translate_label(d["name"], "hi")
+                pos = d.get("position", "center")
+                if pos == "center":
+                    phrases.append(f"आपके सामने {lbl} है")
+                elif pos == "left":
+                    phrases.append(f"आपके बाईं ओर {lbl} है")
+                elif pos == "right":
+                    phrases.append(f"आपके दाईं ओर {lbl} है")
+                else:
+                    phrases.append(f"{lbl} मौजूद है")
+            return ", और ".join(phrases) + "।"
+        else:
+            phrases = []
+            for d in top:
+                name = d["name"]
+                pos = d.get("position", "center")
+                article = "an" if name[0].lower() in "aeiou" else "a"
+                if name.lower() == "person":
+                    if pos == "center":
+                        phrases.append("A person is standing ahead")
+                    elif pos in ("left", "right"):
+                        phrases.append(f"A person is on your {pos}")
+                    else:
+                        phrases.append("A person is detected")
+                elif pos == "center":
+                    phrases.append(f"{article.capitalize()} {name} is in front of you")
+                elif pos in ("left", "right"):
+                    phrases.append(f"{article.capitalize()} {name} is detected on your {pos}")
+                else:
+                    phrases.append(f"{article.capitalize()} {name} is detected")
+
+            if len(phrases) == 1:
+                return phrases[0] + "."
+            elif len(phrases) == 2:
+                p2 = phrases[1]
+                # Lowercase first word of second phrase if starting with A/An
+                if p2.startswith("A ") or p2.startswith("An "):
+                    p2 = p2[0].lower() + p2[1:]
+                return f"{phrases[0]}, and {p2}."
+            else:
+                p2 = phrases[1][0].lower() + phrases[1][1:] if phrases[1].startswith(("A ", "An ")) else phrases[1]
+                p3 = phrases[2][0].lower() + phrases[2][1:] if phrases[2].startswith(("A ", "An ")) else phrases[2]
+                return f"{phrases[0]}, {p2}, and {p3}."
 
     def format_target_found(self, target, pos="in front of you", dist="close", code=None):
         c = code or self.current_code

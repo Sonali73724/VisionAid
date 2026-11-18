@@ -3,8 +3,15 @@ import sys
 import time
 import threading
 import cv2
-import easyocr
-import speech_recognition as sr
+try:
+    import easyocr
+except ImportError:
+    easyocr = None
+
+try:
+    import speech_recognition as sr
+except ImportError:
+    sr = None
 from ultralytics import YOLO
 
 import torch
@@ -100,18 +107,27 @@ print("Initializing VisionAid AI engines...")
 model = YOLO("yolo11n.pt")
 print("YOLO ready")
 
-reader = easyocr.Reader(["en"], gpu=False)
-print("EasyOCR ready")
+# Lazy-loaded on demand when mode == 'text'
+reader = None
+
+OBJECT_ALIASES = {
+    "cell phone": "mobile phone",
+    "dining table": "table",
+    "tv": "monitor",
+    "couch": "sofa",
+    "potted plant": "plant",
+}
 
 settings = VisionSettings()
 language_manager.set_language(settings.language)
 tts = TTSEngine(language=settings.language)
-recognizer = sr.Recognizer()
-try:
-    microphone = sr.Microphone()
-except Exception as e:
-    microphone = None
-    print("Microphone not available:", e)
+recognizer = sr.Recognizer() if sr is not None else None
+microphone = None
+if sr is not None:
+    try:
+        microphone = sr.Microphone()
+    except Exception as e:
+        print("Microphone not available:", e)
 
 
 def speak(text, interrupt=False):
@@ -984,8 +1000,8 @@ class MainScreen(Screen):
 
             try:
                 if mode_to_process in ("object", "obstacle", "find"):
-                    # Fast CPU inference at 320px (~30ms) with conf=0.45 to eliminate false positives
-                    results = model(frame_to_process, imgsz=320, conf=0.45, verbose=False)
+                    # Real-time inference at 320px with conf=0.30 and iou=0.45 for reliable detection
+                    results = model(frame_to_process, imgsz=320, conf=0.30, iou=0.45, verbose=False)
 
                     # Discard results if user switched modes during calculation
                     if self.mode != mode_to_process:
@@ -994,14 +1010,15 @@ class MainScreen(Screen):
                     detections = []
                     for box in results[0].boxes:
                         conf = float(box.conf[0])
-                        if conf < 0.45:
+                        if conf < 0.30:
                             continue
                         x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
-                        obj_name = model.names[int(box.cls[0])]
+                        raw_name = model.names[int(box.cls[0])]
+                        obj_name = OBJECT_ALIASES.get(raw_name, raw_name)
                         cx = (x1 + x2) / 2.0
                         cy = (y1 + y2) / 2.0
-                        box_area = float((x2 - x1) * (y2 - y1))
-                        area_ratio = box_area / frame_area
+                        box_area = float(max(0, x2 - x1) * max(0, y2 - y1))
+                        area_ratio = box_area / max(1.0, frame_area)
 
                         # Display mirror coordinate conversion (flip horizontal)
                         display_cx = w - cx
@@ -1021,7 +1038,9 @@ class MainScreen(Screen):
 
                         detections.append({
                             "name": obj_name,
+                            "raw_name": raw_name,
                             "conf": conf,
+                            "confidence_pct": int(round(conf * 100)),
                             "bbox": (w - x2, y1, w - x1, y2),
                             "area_ratio": area_ratio,
                             "position": position,
@@ -1197,7 +1216,8 @@ class MainScreen(Screen):
 
                     color = (244, 114, 182) if d["position"] == "center" else (192, 132, 252) # BGR
                     pos_indicator = "C" if d["position"] == "center" else ("L" if d["position"] == "left" else "R")
-                    lbl = f"{d['name']} [{pos_indicator}]"
+                    conf_pct = d.get("confidence_pct", int(round(d.get("conf", 0) * 100)))
+                    lbl = f"{d['name']} {conf_pct}% [{pos_indicator}]"
 
                     cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
                     (tw, th), _ = cv2.getTextSize(lbl, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
@@ -1347,14 +1367,14 @@ class MainScreen(Screen):
         now = time.time()
         if mode == "object":
             if not detections:
-                self.hud_banner.text = language_manager.get_string("banner_detecting")
+                self.hud_banner.text = language_manager.get_string("no_objects_detected", settings.language)
                 return
 
             hud_items = []
             for d in detections[:3]:
-                trans_name = language_manager.translate_label(d["name"])
-                pos_str = "in front" if d["position"] == "center" else d["position"]
-                hud_items.append(f"{trans_name} ({pos_str})")
+                trans_name = language_manager.translate_label(d["name"], settings.language)
+                conf_pct = d.get("confidence_pct", int(round(d.get("conf", 0) * 100)))
+                hud_items.append(f"{trans_name} ({conf_pct}%)")
             self.hud_banner.text = " • ".join(hud_items)
 
             unique_top = []
@@ -1368,8 +1388,9 @@ class MainScreen(Screen):
 
             speech_key = "_".join([f"{d['name']}_{d['position']}_{d['proximity']}" for d in unique_top])
             if speech_key != self.last_spoken_objects and (now - self.last_speech_time >= self.speech_interval):
-                sentence = self._create_spatial_sentence(unique_top)
-                speak(sentence)
+                sentence = language_manager.format_object_announcement(unique_top, settings.language)
+                if sentence:
+                    speak(sentence)
                 self.last_spoken_objects = speech_key
                 self.last_speech_time = now
 
