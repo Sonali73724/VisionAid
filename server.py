@@ -16,8 +16,8 @@ from pydantic import BaseModel
 from ultralytics import YOLO
 import easyocr
 
-# Cap PyTorch threads for server stability
-torch.set_num_threads(2)
+# Allocate optimal PyTorch threads for fast real-time CPU inference
+torch.set_num_threads(min(6, os.cpu_count() or 4))
 
 from auth_manager import auth_manager
 from face_engine import FaceAnalyzer
@@ -92,6 +92,7 @@ def analyze_frame(
     Core vision endpoint: processes mobile camera frame and returns
     bounding boxes, spatial cues, and audio instructions.
     """
+    global ocr_reader
     try:
         contents = file.file.read()
     except Exception:

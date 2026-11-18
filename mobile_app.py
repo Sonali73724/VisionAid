@@ -30,7 +30,7 @@ except ImportError:
 
 try:
     from ultralytics import YOLO as LocalYOLO
-except ImportError:
+except Exception:
     LocalYOLO = None
 
 OBJECT_ALIASES = {
@@ -1288,17 +1288,48 @@ class MainScreen(Screen):
                 sound_manager.play_beacon(is_locked=False)
 
         speech_text = res.get("speech_text")
-        if speech_text and self.mode == "object":
+        if speech_text:
             now = time.time()
-            obj_key = "_".join([f"{d.get('name')}_{d.get('position')}" for d in dets[:3]])
-            if (obj_key != self.last_spoken_key) or (now - self.last_speech_time >= self.speech_interval):
-                if (speech_text != self.last_spoken_text) or (now - self.last_speech_time >= self.speech_interval):
-                    speak(speech_text)
-                    self.last_spoken_text = speech_text
-                    self.last_spoken_key = obj_key
-                    self.last_speech_time = now
-        elif speech_text and self.mode != "object":
-            speak(speech_text)
+            min_cd = 2.5  # Prevent audio chatter and queue buildup
+            if self.mode == "object":
+                obj_key = "_".join([f"{d.get('name')}_{d.get('position')}" for d in dets[:3]])
+                if now - self.last_speech_time >= min_cd:
+                    if (obj_key != self.last_spoken_key) or (now - self.last_speech_time >= 5.0):
+                        speak(speech_text, interrupt=True)
+                        self.last_spoken_text = speech_text
+                        self.last_spoken_key = obj_key
+                        self.last_speech_time = now
+            elif self.mode == "obstacle":
+                if now - self.last_speech_time >= 2.2:
+                    if (speech_text != self.last_spoken_text) or (now - self.last_speech_time >= 4.0):
+                        speak(speech_text, interrupt=True)
+                        self.last_spoken_text = speech_text
+                        self.last_speech_time = now
+            elif self.mode == "find":
+                is_locked = res.get("target_locked", False)
+                lock_key = f"{is_locked}_{res.get('hud_text', '')}"
+                if now - self.last_speech_time >= 2.5:
+                    if (lock_key != self.last_spoken_key) or (now - self.last_speech_time >= 4.5):
+                        speak(speech_text, interrupt=True)
+                        self.last_spoken_text = speech_text
+                        self.last_spoken_key = lock_key
+                        self.last_speech_time = now
+            elif self.mode == "face":
+                faces = res.get("faces", [])
+                face_key = "_".join([f"{f.get('name')}_{f.get('emotion')}" for f in faces[:2]])
+                if now - self.last_speech_time >= 3.0:
+                    if (face_key != self.last_spoken_key) or (now - self.last_speech_time >= 5.0):
+                        speak(speech_text, interrupt=True)
+                        self.last_spoken_text = speech_text
+                        self.last_spoken_key = face_key
+                        self.last_speech_time = now
+            elif self.mode == "text":
+                read_t = res.get("read_text", "").strip()
+                if read_t and (now - self.last_speech_time >= 3.5):
+                    if read_t != self.last_spoken_text:
+                        speak(speech_text, interrupt=True)
+                        self.last_spoken_text = read_t
+                        self.last_speech_time = now
 
         self.server_detections = dets
         self.server_faces = res.get("faces", [])

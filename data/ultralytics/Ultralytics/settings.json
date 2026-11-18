@@ -1,0 +1,19 @@
+{
+  "settings_version": "0.0.8",
+  "datasets_dir": "E:\\New folder\\datasets",
+  "weights_dir": "E:\\New folder\\VisionAid\\weights",
+  "runs_dir": "E:\\New folder\\VisionAid\\runs",
+  "uuid": "ccad5349b128f79fc83dcb9503f1ecdcf43e232bbcd805b442946243208a3813",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "mlflow": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}
