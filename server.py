@@ -129,12 +129,12 @@ def analyze_frame(
 
     # 1. OBJECT, OBSTACLE, RADAR, FIND MODES (YOLO)
     if mode in ("object", "obstacle", "radar", "find"):
-        results = model(frame, imgsz=320, conf=0.30, iou=0.45, verbose=False)
+        results = model(frame, imgsz=384, conf=0.25, iou=0.45, verbose=False)
         detections = []
 
         for box in results[0].boxes:
             conf = float(box.conf[0])
-            if conf < 0.30:
+            if conf < 0.25:
                 continue
             x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
             raw_name = model.names[int(box.cls[0])]
@@ -182,8 +182,41 @@ def analyze_frame(
                 "frame_h": h,
             })
 
+        # Detect human face in Object mode if person not already detected by YOLO
+        if mode == "object" and not any(d["name"] == "person" for d in detections):
+            try:
+                face_list = face_analyzer.analyze_faces(frame)
+                for f in face_list[:1]:
+                    fx, fy, fw, fh = f["box"]
+                    face_area = float(fw * fh)
+                    f_ratio = face_area / max(1.0, frame_area)
+                    detections.append({
+                        "name": "person",
+                        "raw_name": "person",
+                        "conf": 0.88,
+                        "confidence_pct": 88,
+                        "bbox": [fx, fy, fx + fw, fy + fh],
+                        "norm_bbox": [round(fx/w, 4), round(fy/h, 4), round((fx+fw)/w, 4), round((fy+fh)/h, 4)],
+                        "area_ratio": f_ratio,
+                        "position": f.get("position", "center"),
+                        "proximity": "close" if f_ratio >= 0.15 else "nearby",
+                        "cx": fx + fw / 2.0,
+                        "cy": fy + fh / 2.0,
+                        "frame_w": w,
+                        "frame_h": h,
+                    })
+            except Exception:
+                pass
+
         detections.sort(key=lambda d: d["area_ratio"], reverse=True)
         response["detections"] = detections
+
+        # Real-time console diagnostics for transparency
+        if detections:
+            top_str = ", ".join([f"{d['name']} ({d['confidence_pct']}%)" for d in detections[:3]])
+            print(f"[{mode.upper()}] ✅ {len(detections)} object(s) detected: {top_str}")
+        else:
+            print(f"[{mode.upper()}] Scanning frame {w}x{h}... (0 objects above 25% conf)")
 
         # Mode Specific Logic
         if mode == "object":

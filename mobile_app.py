@@ -260,7 +260,7 @@ class ThreadedCamera:
             self.core_cam = None
 
 
-def encode_frame_to_bytes(frame_to_send, target_w=320):
+def encode_frame_to_bytes(frame_to_send, target_w=480):
     """
     Converts either a numpy ndarray (desktop OpenCV) or a Kivy Texture (Android CoreCamera)
     into standard compressed image bytes (JPEG preferred, BMP fallback).
@@ -275,14 +275,14 @@ def encode_frame_to_bytes(frame_to_send, target_w=320):
         target_h = max(1, int(h * (target_w / max(1, w))))
         if cv2 is not None:
             small = cv2.resize(frame_to_send, (target_w, target_h))
-            ret, jpeg = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 65])
+            ret, jpeg = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if ret:
                 return jpeg.tobytes(), "image/jpeg"
         if PILImage is not None:
             try:
                 pil_img = PILImage.fromarray(frame_to_send)
                 buf = io.BytesIO()
-                pil_img.resize((target_w, target_h)).save(buf, format="JPEG", quality=65)
+                pil_img.resize((target_w, target_h)).save(buf, format="JPEG", quality=75)
                 return buf.getvalue(), "image/jpeg"
             except Exception:
                 pass
@@ -1124,7 +1124,7 @@ class MainScreen(Screen):
                 continue
 
             try:
-                image_bytes, mime_type = encode_frame_to_bytes(frame_to_send, target_w=320)
+                image_bytes, mime_type = encode_frame_to_bytes(frame_to_send, target_w=480)
                 if not image_bytes:
                     time.sleep(0.04)
                     continue
