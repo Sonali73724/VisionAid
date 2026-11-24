@@ -353,6 +353,8 @@ class LanguageSelectionScreen(Screen):
         self.add_widget(root)
 
     def on_enter(self):
+        if self.manager and self.manager.current != self.name:
+            return
         # Audio introduction on screen entrance
         self.tts.speak("Please choose your language. Then press continue.", interrupt=True)
 
@@ -519,6 +521,8 @@ class LoginScreen(Screen):
         self.add_widget(root)
 
     def on_enter(self):
+        if self.manager and self.manager.current != self.name:
+            return
         # Update texts based on current language
         self.title_lbl.text = f"[b]{language_manager.get_string('login_title')}[/b]"
         self.sub_lbl.text = language_manager.get_string("login_subtitle")
@@ -678,6 +682,8 @@ class SignupScreen(Screen):
         self.add_widget(root)
 
     def on_enter(self):
+        if self.manager and self.manager.current != self.name:
+            return
         self.status_lbl.text = ""
         self.tts.speak("Create Account screen. Enter your name, email, and password.", interrupt=True)
 

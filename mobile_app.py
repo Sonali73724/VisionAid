@@ -1371,6 +1371,21 @@ class VisionAidMobileApp(App):
 
     def on_start(self):
         Clock.schedule_once(self._request_permissions_delayed, 0.6)
+        from kivy.utils import platform as kivy_platform
+        if kivy_platform not in ('android', 'ios'):
+            threading.Thread(target=self._ensure_local_server, daemon=True).start()
+
+    def _ensure_local_server(self):
+        url = getattr(settings, "server_url", "http://127.0.0.1:8000")
+        if "127.0.0.1" in url or "localhost" in url:
+            try:
+                urllib.request.urlopen(f"{url}/api/health", timeout=1.2)
+            except Exception:
+                import subprocess
+                server_py = os.path.join(os.path.dirname(__file__), "server.py")
+                if os.path.exists(server_py):
+                    print("[VisionAid] Local AI Server is offline. Starting server.py automatically...")
+                    subprocess.Popen([sys.executable, server_py], cwd=os.path.dirname(__file__))
 
     def _request_permissions_delayed(self, dt):
         from kivy.utils import platform as kivy_platform
