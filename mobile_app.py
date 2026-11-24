@@ -306,7 +306,8 @@ def encode_frame_to_bytes(frame_to_send, target_w=480):
         # Method 2B: Android Native Java Bitmap Compression (Hardware JPEG encoder on device)
         if kivy_platform == 'android':
             try:
-                from jnius import autoclass
+                # pyrefly: ignore [missing-import]
+                from jnius import autoclass  # type: ignore
                 Bitmap = autoclass('android.graphics.Bitmap')
                 BitmapConfig = autoclass('android.graphics.Bitmap$Config')
                 CompressFormat = autoclass('android.graphics.Bitmap$CompressFormat')
@@ -972,7 +973,8 @@ class MainScreen(Screen):
     def open_camera(self):
         if kivy_platform == 'android':
             try:
-                from android.permissions import check_permission, request_permissions, Permission
+                # pyrefly: ignore [missing-import]
+                from android.permissions import check_permission, request_permissions, Permission  # type: ignore
                 if not check_permission(Permission.CAMERA):
                     print("Camera permission not granted, requesting...")
                     request_permissions([Permission.CAMERA, Permission.RECORD_AUDIO])
@@ -1391,7 +1393,8 @@ class VisionAidMobileApp(App):
         from kivy.utils import platform as kivy_platform
         if kivy_platform == 'android':
             try:
-                from android.permissions import request_permissions, Permission
+                # pyrefly: ignore [missing-import]
+                from android.permissions import request_permissions, Permission  # type: ignore
                 request_permissions([Permission.CAMERA, Permission.RECORD_AUDIO])
                 print("Android camera/mic permissions requested safely")
             except Exception as e:

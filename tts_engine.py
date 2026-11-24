@@ -34,7 +34,8 @@ class TTSEngine:
 
         if self.is_android:
             try:
-                from jnius import autoclass
+                # pyrefly: ignore [missing-import]
+                from jnius import autoclass  # type: ignore
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 if getattr(PythonActivity, "mActivity", None) is not None:
                     TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
@@ -110,7 +111,8 @@ class TTSEngine:
 
         if self.is_android and self.speaker:
             try:
-                from jnius import autoclass
+                # pyrefly: ignore [missing-import]
+                from jnius import autoclass  # type: ignore
                 Locale = autoclass('java.util.Locale')
                 self.speaker.setLanguage(Locale(self.language))
                 print(f"Android TTS language set to: {self.language}")
@@ -150,7 +152,8 @@ class TTSEngine:
         if self.is_android:
             def _android_speak():
                 try:
-                    from jnius import autoclass
+                    # pyrefly: ignore [missing-import]
+                    from jnius import autoclass  # type: ignore
                     TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
                     if not self.speaker:
                         PythonActivity = autoclass('org.kivy.android.PythonActivity')
