@@ -799,7 +799,7 @@ class MainScreen(Screen):
             self.vp_border = Line(rounded_rectangle=(0, 0, vp_wrapper.width, vp_wrapper.height, dp(18)), width=1.1)
         vp_wrapper.bind(size=lambda _, s: (setattr(self.vp_bg, "size", s), setattr(self.vp_border, "rounded_rectangle", (0, 0, s[0], s[1], dp(18)))))
 
-        self.camera_image = Image(fit_mode="contain", allow_stretch=True, keep_ratio=True, size_hint=(1, 1), pos_hint={"x": 0, "y": 0}, opacity=0)
+        self.camera_image = Image(fit_mode="contain", size_hint=(1, 1), pos_hint={"x": 0, "y": 0}, opacity=0)
 
         # Standby Placeholder
         self.placeholder = BoxLayout(orientation="vertical", spacing=dp(6), padding=[dp(14), dp(16), dp(14), dp(16)], size_hint=(1, 1), pos_hint={"x": 0, "y": 0})
@@ -966,7 +966,7 @@ class MainScreen(Screen):
 
     def open_settings(self, *args):
         if self.manager:
-            self.manager.transition = SlideTransition(direction="left")
+            self.manager.transition.direction = "left"
             self.manager.current = "settings"
 
     def open_camera(self):

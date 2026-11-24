@@ -384,7 +384,7 @@ class LanguageSelectionScreen(Screen):
 
         # Route to Login if not logged in, else to Main
         if self.manager:
-            self.manager.transition = SlideTransition(direction="left")
+            self.manager.transition.direction = "left"
             if self.settings.current_user:
                 self.manager.current = "main"
             else:
@@ -557,12 +557,12 @@ class LoginScreen(Screen):
 
     def _goto_signup(self, *args):
         if self.manager:
-            self.manager.transition = SlideTransition(direction="left")
+            self.manager.transition.direction = "left"
             self.manager.current = "signup"
 
     def _goto_main(self):
         if self.manager:
-            self.manager.transition = SlideTransition(direction="left")
+            self.manager.transition.direction = "left"
             self.manager.current = "main"
 
 
@@ -713,10 +713,10 @@ class SignupScreen(Screen):
 
     def _goto_login(self, *args):
         if self.manager:
-            self.manager.transition = SlideTransition(direction="right")
+            self.manager.transition.direction = "right"
             self.manager.current = "login"
 
     def _goto_main(self):
         if self.manager:
-            self.manager.transition = SlideTransition(direction="left")
+            self.manager.transition.direction = "left"
             self.manager.current = "main"
